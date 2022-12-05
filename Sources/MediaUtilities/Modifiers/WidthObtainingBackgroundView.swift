@@ -7,20 +7,18 @@
 
 import SwiftUI
 
-@available(iOS 14.0, macOS 11, *)
+@available(iOS 13.0, macOS 10.15, *)
 struct WidthObtainingBackgroundView: View {
     @Binding var width: CGFloat
 
     var body: some View {
         GeometryReader { proxy in
-            Color.clear
+//            withAnimation {
+//                width = proxy.size.width
+//            }
+             Color.clear
                 .onAppear {
                     width = proxy.size.width
-                }
-                .onChange(of: proxy.size.width) { _ in
-                    withAnimation {
-                        width = proxy.size.width
-                    }
                 }
         }
     }

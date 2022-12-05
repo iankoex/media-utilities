@@ -7,11 +7,15 @@
 
 import Combine
 import AVFoundation
+import SwiftUI
 
 @available(iOS 13.0, macOS 10.15, *)
 final public class PlayerViewModel: ObservableObject {
     public let player = AVPlayer()
     @Published public var allowsPictureInPicturePlayback: Bool = true
+    @Published public var isEditingCurrentTime = false {
+        didSet { isEditingCurrentTime ? pause() : play() }
+    }
     @Published public var isPlaying = false {
         didSet { isPlaying ? play() : pause() }
     }
@@ -38,18 +42,18 @@ final public class PlayerViewModel: ObservableObject {
 
     public init() {
 
+        $isEditingCurrentTime
+            .dropFirst()
+            .filter({ $0 == false })
+            .sink(receiveValue: { [weak self] _ in
+                guard let self = self else { return }
+                self.seekTo(self.currentTime)
+            })
+            .store(in: &subscriptions)
+
         player.publisher(for: \.timeControlStatus)
             .sink { [weak self] status in
-                switch status {
-                case .playing:
-                    self?.isPlaying = true
-                case .paused:
-                    self?.isPlaying = false
-                case .waitingToPlayAtSpecifiedRate:
-                    break
-                @unknown default:
-                    break
-                }
+                self?.updatePlayState(with: status)
             }
             .store(in: &subscriptions)
 
@@ -78,8 +82,9 @@ final public class PlayerViewModel: ObservableObject {
         item.publisher(for: \.status)
             .filter({ $0 == .readyToPlay })
             .sink(receiveValue: { [weak self] _ in
-                self?.duration = item.asset.duration.seconds
-                self?.endPlayingAt = self?.duration ?? 0
+                let time = item.asset.duration.seconds
+                self?.duration = time
+                self?.endPlayingAt = time
             })
             .store(in: &subscriptions)
     }
@@ -103,16 +108,10 @@ final public class PlayerViewModel: ObservableObject {
     }
 
     public func play() {
-        guard isPlaying == false else {
-            return
-        }
         player.play()
     }
 
     public func pause() {
-        guard isPlaying == true else {
-            return
-        }
         player.pause()
     }
 
@@ -133,9 +132,6 @@ final public class PlayerViewModel: ObservableObject {
     public func seekTo(_ seconds: Double) {
         let cmTime = CMTime(seconds: seconds, preferredTimescale: 1000)
         player.seek(to: cmTime)
-        if player.rate != 0 {
-            player.play()
-        }
     }
 
     private func addTimeObserver() {
@@ -147,8 +143,13 @@ final public class PlayerViewModel: ObservableObject {
     }
 
     private func updateCurrentTime(_ time: CMTime) {
-        self.currentTime = time.seconds
-        if endPlayingAt != 0 && currentTime > endPlayingAt {
+        guard isEditingCurrentTime == false else {
+            return
+        }
+        withAnimation {
+            self.currentTime = time.seconds
+        }
+        if endPlayingAt != 0 && currentTime >= endPlayingAt {
             endPlayingAtReached()
         }
     }
@@ -159,6 +160,23 @@ final public class PlayerViewModel: ObservableObject {
             player.play()
         } else {
             player.pause()
+        }
+    }
+
+    private func updatePlayState(with status: AVPlayer.TimeControlStatus) {
+        switch status {
+        case .playing:
+            if self.isPlaying == false {
+                self.isPlaying = true
+            }
+        case .paused:
+            if self.isPlaying == true {
+                self.isPlaying = false
+            }
+        case .waitingToPlayAtSpecifiedRate:
+            break
+        @unknown default:
+            break
         }
     }
 

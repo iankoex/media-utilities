@@ -89,7 +89,9 @@ public struct VideoEditor: View {
                 }
             }
             .padding(.top)
-
+            Button("playPauser") {
+                playerVM.isPlaying.toggle()
+            }
             Spacer()
             if isShowingSlider && !isExportCompletedSuccessfully {
                 VideoSliderView()

@@ -4,39 +4,69 @@ import SwiftUI
 public struct HorizontalRangeTrack<ValueView: View, MaskView: View>: View {
     @Environment(\.trackRange) var range
     @Environment(\.rangeTrackConfiguration) var configuration
-    let view: AnyView
-    let mask: AnyView
+    let view: ValueView
+    let mask: MaskView
 
     public var body: some View {
         GeometryReader { geometry in
-            self.view
-                .accentColor(Color.accentColor)
-                .mask(
-                    ZStack {
-                        self.mask
-                             .frame(
-                                 width: rangeDistance(
-                                    overallLength: geometry.size.width,
-                                    range: self.range,
-                                    bounds: self.configuration.bounds,
-                                    lowerStartOffset: self.configuration.lowerLeadingOffset,
-                                    lowerEndOffset: self.configuration.lowerTrailingOffset,
-                                    upperStartOffset: self.configuration.upperLeadingOffset,
-                                    upperEndOffset: self.configuration.upperTrailingOffset
-                                 )
-                             )
-                             .offset(
-                                 x: distanceFrom(
-                                    value: self.range.lowerBound,
-                                    availableDistance: geometry.size.width,
-                                    bounds: self.configuration.bounds,
-                                    leadingOffset: self.configuration.lowerLeadingOffset,
-                                    trailingOffset: self.configuration.lowerTrailingOffset
-                                 )
-                             )
+            ZStack {
+                Color.black
+                    .opacity(0.5)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .reverseMask {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .frame(
+                                    width: rangeDistance(
+                                        overallLength: geometry.size.width,
+                                        range: self.range,
+                                        bounds: self.configuration.bounds,
+                                        lowerStartOffset: self.configuration.lowerLeadingOffset,
+                                        lowerEndOffset: self.configuration.lowerTrailingOffset,
+                                        upperStartOffset: self.configuration.upperLeadingOffset,
+                                        upperEndOffset: self.configuration.upperTrailingOffset
+                                    )
+                                )
+                                .offset(
+                                    x: distanceFrom(
+                                        value: self.range.lowerBound,
+                                        availableDistance: geometry.size.width,
+                                        bounds: self.configuration.bounds,
+                                        leadingOffset: self.configuration.lowerLeadingOffset,
+                                        trailingOffset: self.configuration.lowerTrailingOffset
+                                    )
+                                )
+                        }
+                        .frame(width: geometry.size.width, alignment: .leading)
                     }
-                    .frame(width: geometry.size.width, alignment: .leading)
-                )
+                self.view
+                    .mask(
+                        ZStack {
+                            self.mask
+                                .frame(
+                                    width: rangeDistance(
+                                        overallLength: geometry.size.width,
+                                        range: self.range,
+                                        bounds: self.configuration.bounds,
+                                        lowerStartOffset: self.configuration.lowerLeadingOffset,
+                                        lowerEndOffset: self.configuration.lowerTrailingOffset,
+                                        upperStartOffset: self.configuration.upperLeadingOffset,
+                                        upperEndOffset: self.configuration.upperTrailingOffset
+                                    )
+                                )
+                                .offset(
+                                    x: distanceFrom(
+                                        value: self.range.lowerBound,
+                                        availableDistance: geometry.size.width,
+                                        bounds: self.configuration.bounds,
+                                        leadingOffset: self.configuration.lowerLeadingOffset,
+                                        trailingOffset: self.configuration.lowerTrailingOffset
+                                    )
+                                )
+                        }
+                            .frame(width: geometry.size.width, alignment: .leading)
+                    )
+            }
         }
     }
 }
@@ -44,8 +74,8 @@ public struct HorizontalRangeTrack<ValueView: View, MaskView: View>: View {
 @available(iOS 13.0, macOS 10.15, *)
 extension HorizontalRangeTrack {
     public init(view: ValueView, mask: MaskView) {
-        self.view = AnyView(view)
-        self.mask = AnyView(mask)
+        self.view = view
+        self.mask = mask
     }
 }
 
@@ -67,5 +97,19 @@ extension HorizontalRangeTrack where MaskView == Capsule {
 extension HorizontalRangeTrack where ValueView == DefaultHorizontalValueView, MaskView == Capsule {
     public init() {
         self.init(view: DefaultHorizontalValueView(), mask: Capsule())
+    }
+}
+
+@available(iOS 13.0, macOS 10.15, *)
+extension View {
+    @inlinable
+    public func reverseMask<Mask: View>(@ViewBuilder _ mask: () -> Mask) -> some View {
+        self.mask (
+            Rectangle()
+                .overlay(
+                    mask()
+                        .blendMode(.destinationOut)
+                )
+        )
     }
 }

@@ -8,8 +8,10 @@ public struct RangeSlider: View {
     private var configuration: RangeSliderStyleConfiguration
     
     public var body: some View {
-        self.style.makeBody(configuration:
-            self.configuration.with(dragOffset: self.$dragOffset)
+        self.style.makeBody(
+            configuration: self.configuration.with(
+                dragOffset: self.$dragOffset
+            )
         )
     }
 }
@@ -25,7 +27,8 @@ extension RangeSlider {
 extension RangeSlider {
     public init<V>(
         value: Binding<V>,
-        range: Binding<ClosedRange<V>>,
+        lowerBound: Binding<V>,
+        upperBound: Binding<V>,
         in bounds: ClosedRange<V> = 0.0...1.0,
         step: V.Stride = 0.001,
         distance: ClosedRange<V> = 0.0 ... .infinity,
@@ -35,8 +38,11 @@ extension RangeSlider {
             RangeSliderStyleConfiguration(
                 value: Binding(get: { CGFloat(value.wrappedValue.clamped(to: bounds)) }, set: { value.wrappedValue = V($0) }),
                 range: Binding(
-                    get: { CGFloat(range.wrappedValue.clamped(to: bounds).lowerBound) ... CGFloat(range.wrappedValue.clamped(to: bounds).upperBound) },
-                    set: { range.wrappedValue = V($0.lowerBound) ... V($0.upperBound) }
+                    get: { CGFloat(lowerBound.wrappedValue.clamped(to: bounds)) ... CGFloat(upperBound.wrappedValue.clamped(to: bounds)) },
+                    set: {
+                        lowerBound.wrappedValue = V($0.lowerBound)
+                        upperBound.wrappedValue = V($0.upperBound)
+                    }
                 ),
                 bounds: CGFloat(bounds.lowerBound) ... CGFloat(bounds.upperBound),
                 step: CGFloat(step),
