@@ -30,7 +30,10 @@ public struct VideoSliderView: View {
             if videoUtil.videoImageFrames.isEmpty {
                 SpinnerView()
             } else {
-                sliderView
+                HStack {
+                    sliderView
+                    Spacer() // Dont ask why FAFO
+                }
             }
         }
         .transition(.move(edge: .bottom))

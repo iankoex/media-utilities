@@ -63,14 +63,6 @@ public struct CustomControlsView: View {
                         Text("pause.circle")
                     })
                 }
-
-                if let duration = playerVM.duration {
-                    Slider(value: $playerVM.currentTime, in: 0...duration, onEditingChanged: { isEditing in
-                        playerVM.isEditingCurrentTime = isEditing
-                    })
-                } else {
-                    Spacer()
-                }
             }
         }
         .padding()

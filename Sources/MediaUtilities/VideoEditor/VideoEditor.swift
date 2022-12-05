@@ -16,7 +16,8 @@ public struct VideoEditor: View {
     // callbacks for done and cancel buttons
     // before done set the statusBar to default
     //    @Environment(\.scenePhase) var scenePhase
-    @StateObject private var videoUtil: VideoUtil = .init()
+    @StateObject private var videoUtil: VideoUtil = VideoUtil()
+    @StateObject private var playerVM = PlayerViewModel()
 
     @State private var isShowingControlButtonNames: Bool = false
     @State private var isShowingSlider: Bool = false
@@ -26,9 +27,6 @@ public struct VideoEditor: View {
         didSet { playerVM.isShowingControls = isExportCompletedSuccessfully }
     }
     @State private var exportedVideoURL: URL? = nil
-    // The least seconds should be 10 seconds
-    // create a offset value for 5 seconds and makesure offset are not less than that
-    @StateObject private var playerVM = PlayerViewModel()
 
     public init(isPresented: Binding<Bool>, videoURL: Binding<URL?>, finalVideoURL: Binding<URL?>) {
         self._isPresented = isPresented
@@ -36,18 +34,18 @@ public struct VideoEditor: View {
         self._finalVideoURL = finalVideoURL
     }
 
-    var convinienceVideoURL: URL {
-        if isExportCompletedSuccessfully {
-            return exportedVideoURL ?? videoURL!
-        } else {
-            return videoURL!
-        }
-    }
+//    var convinienceVideoURL: URL {
+//        if isExportCompletedSuccessfully {
+//            return exportedVideoURL ?? videoURL!
+//        } else {
+//            return videoURL!
+//        }
+//    }
 
     public var body: some View {
         ZStack {
             if videoURL != nil {
-                CustomVideoPlayer()
+                videoPlayer
             } else {
                 SpinnerView()
             }
@@ -60,17 +58,23 @@ public struct VideoEditor: View {
                 exportingOverlay
             }
         }
-        .onAppear {
-            videoUtil.videoURL = videoURL
-            playerVM.isShowingControls = false
-            playerVM.setCurrentItem(videoURL!)
-            playerVM.play()
-        }
+        .onAppear(perform: initialiseOrResetEditor)
         .onDisappear {
             playerVM.pause()
         }
         .environmentObject(videoUtil)
         .environmentObject(playerVM)
+    }
+
+    var videoPlayer: some View {
+        Group {
+            if isExportCompletedSuccessfully {
+                CustomVideoPlayer()
+                    .padding(.top)
+            } else {
+                CustomVideoPlayer()
+            }
+        }
     }
 
     var videoOverlay: some View {
@@ -109,23 +113,20 @@ public struct VideoEditor: View {
     }
 
     var controlsButtons: some View {
-        VStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 15) {
-                    doneButton
-                    controlButton(audioControlTitle, image: audioControlImage) {
-                        withAnimation {
-                            playerVM.isMuted.toggle()
-                        }
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 15) {
+                doneButton
+                controlButton(audioControlTitle, image: audioControlImage) {
+                    withAnimation {
+                        playerVM.isMuted.toggle()
                     }
-                    controlButton("Trim", image: "timeline.selection") {
-                        withAnimation {
-                            isShowingSlider.toggle()
-                        }
+                }
+                controlButton("Trim", image: "timeline.selection") {
+                    withAnimation {
+                        isShowingSlider.toggle()
                     }
                 }
             }
-            Spacer()
         }
     }
 
@@ -167,21 +168,40 @@ public struct VideoEditor: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
+    private func controlButton(_ name: String, image: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 0) {
+            Spacer()
+            Button(action: action) {
+                HStack {
+                    if isShowingControlButtonNames {
+                        Text(name)
+                    }
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 1)
+                        Image(systemName: image)
+                            .symbolRenderingMode(.hierarchical)
+                            .font(.largeTitle)
+                        Spacer(minLength: 1)
+                    }
+                    .frame(maxWidth: 45)
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.white)
+        }
+    }
+
     private func cancelButtonActions() {
         withAnimation {
             if isExportCompletedSuccessfully {
-                // revert to editing view
-                isExportCompletedSuccessfully = false
-                //                startOffset = 0
-                //                seekerOffset = 0
-                //                endOffset = 0
+               initialiseOrResetEditor()
             } else {
                 // delete from storage
                 isPresented = false
                 videoURL = nil
                 isPresented = false
                 videoURL = nil
-//                MediaPicker.cleanDirectory()
+                MediaPicker.cleanDirectory()
                 VideoUtil.cleanDirectory()
             }
         }
@@ -215,33 +235,11 @@ public struct VideoEditor: View {
         }
     }
 
-    private func controlButton(_ name: String, image: String, action: @escaping () -> Void) -> some View {
-        HStack(spacing: 0) {
-            Spacer()
-            Button(action: action) {
-                HStack {
-                    if isShowingControlButtonNames {
-                        Text(name)
-                    }
-                    HStack(spacing: 0) {
-                        Spacer(minLength: 1)
-                        Image(systemName: image)
-                            .symbolRenderingMode(.hierarchical)
-                            .font(.largeTitle)
-                        Spacer(minLength: 1)
-                    }
-                    .frame(maxWidth: 50)
-                }
-            }
-            .buttonStyle(.plain)
-            .foregroundColor(.white)
-        }
-    }
-
     private func exportCompleted(_ result: VideoUtil.Result) {
         switch result {
         case let .success(successURL):
             exportedVideoURL = successURL
+            playerVM.setCurrentItem(exportedVideoURL!)
             withAnimation {
                 isExporting = false
                 isExportCompletedSuccessfully = true
@@ -254,5 +252,19 @@ public struct VideoEditor: View {
             }
             print(error)
         }
+    }
+
+    private func initialiseOrResetEditor() {
+        isExportCompletedSuccessfully = false
+        isShowingSlider = false
+        if videoUtil.videoURL != videoURL {
+            videoUtil.videoURL = videoURL
+        }
+        playerVM.isShowingControls = false
+        playerVM.currentTime = .zero
+        playerVM.startPlayingAt = .zero
+        playerVM.endPlayingAt = .zero
+        playerVM.setCurrentItem(videoURL!)
+        playerVM.play()
     }
 }

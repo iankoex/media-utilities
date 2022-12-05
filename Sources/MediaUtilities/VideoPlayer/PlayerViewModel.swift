@@ -12,11 +12,16 @@ import AVFoundation
 final public class PlayerViewModel: ObservableObject {
     public let player = AVPlayer()
     @Published public var allowsPictureInPicturePlayback: Bool = true
-    @Published public var isPlaying = false
-    @Published public var isMuted = false
+    @Published public var isPlaying = false {
+        didSet { isPlaying ? play() : pause() }
+    }
+    @Published public var isMuted = false {
+        didSet { isMuted ? mute() : unmute() }
+    }
     @Published public var loopPlayback = true
-    @Published public var isShowingControls = true
-    @Published public var isEditingCurrentTime = false
+    @Published public var isShowingControls = true {
+        didSet { addTimeObserver() }
+    }
     @Published public var currentTime: Double = .zero
     @Published public var duration: Double = .zero
     @Published public var startPlayingAt: Double = .zero
@@ -32,17 +37,6 @@ final public class PlayerViewModel: ObservableObject {
     }
 
     public init() {
-        $isEditingCurrentTime
-            .dropFirst()
-            .filter({ $0 == false })
-            .sink(receiveValue: { [weak self] _ in
-                guard let self = self else { return }
-                self.player.seek(to: CMTime(seconds: self.currentTime, preferredTimescale: 1), toleranceBefore: .zero, toleranceAfter: .zero)
-                if self.player.rate != 0 {
-                    self.player.play()
-                }
-            })
-            .store(in: &subscriptions)
 
         player.publisher(for: \.timeControlStatus)
             .sink { [weak self] status in
@@ -59,10 +53,13 @@ final public class PlayerViewModel: ObservableObject {
             }
             .store(in: &subscriptions)
 
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { [weak self] time in
-            guard let self = self else { return }
-            self.updateCurrentTime(time)
-        }
+        player.publisher(for: \.isMuted)
+            .sink { [weak self] status in
+                self?.isMuted = status
+            }
+            .store(in: &subscriptions)
+
+        addTimeObserver()
 
         NotificationCenter.default.addObserver(
             self,
@@ -82,6 +79,7 @@ final public class PlayerViewModel: ObservableObject {
             .filter({ $0 == .readyToPlay })
             .sink(receiveValue: { [weak self] _ in
                 self?.duration = item.asset.duration.seconds
+                self?.endPlayingAt = self?.duration ?? 0
             })
             .store(in: &subscriptions)
     }
@@ -105,16 +103,47 @@ final public class PlayerViewModel: ObservableObject {
     }
 
     public func play() {
+        guard isPlaying == false else {
+            return
+        }
         player.play()
     }
 
     public func pause() {
+        guard isPlaying == true else {
+            return
+        }
         player.pause()
+    }
+
+    public func mute() {
+        guard isMuted == false else {
+            return
+        }
+        player.isMuted = true
+    }
+
+    public func unmute() {
+        guard isMuted == true else {
+            return
+        }
+        player.isMuted = false
     }
 
     public func seekTo(_ seconds: Double) {
         let cmTime = CMTime(seconds: seconds, preferredTimescale: 1000)
         player.seek(to: cmTime)
+        if player.rate != 0 {
+            player.play()
+        }
+    }
+
+    private func addTimeObserver() {
+        let interval = CMTime(seconds: isShowingControls ? 1 : 0.25, preferredTimescale: 60)
+        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            guard let self = self else { return }
+            self.updateCurrentTime(time)
+        }
     }
 
     private func updateCurrentTime(_ time: CMTime) {
@@ -134,9 +163,6 @@ final public class PlayerViewModel: ObservableObject {
     }
 
     @objc private func playerItemDidReachEnd(notification: NSNotification) {
-        if loopPlayback {
-            seekTo(startPlayingAt)
-            player.play()
-        }
+        endPlayingAtReached()
     }
 }
