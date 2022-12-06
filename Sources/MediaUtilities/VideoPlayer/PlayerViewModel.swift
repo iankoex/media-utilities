@@ -85,6 +85,7 @@ final public class PlayerViewModel: ObservableObject {
                 let time = item.asset.duration.seconds
                 self?.duration = time
                 self?.endPlayingAt = time
+                self?.player.play()
             })
             .store(in: &subscriptions)
     }

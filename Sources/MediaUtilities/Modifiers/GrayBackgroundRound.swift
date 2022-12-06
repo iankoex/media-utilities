@@ -7,19 +7,20 @@
 
 import SwiftUI
 
-@available(iOS 15.0, macOS 12.0, *)
+@available(iOS 13.0, macOS 10.15, *)
 extension View {
     func grayBackgroundRound() -> some View {
         modifier(GrayBackgroundRound())
     }
 }
 
-@available(iOS 15.0, macOS 12.0, *)
+@available(iOS 13.0, macOS 10.15, *)
 struct GrayBackgroundRound: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(.horizontal, 5)
             .padding(.vertical, 5)
-            .background(Color.gray.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
+            .background(Color.gray.opacity(0.3))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }

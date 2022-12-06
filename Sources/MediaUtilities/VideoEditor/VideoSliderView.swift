@@ -47,11 +47,10 @@ public struct VideoSliderView: View {
             value: $playerVM.currentTime,
             lowerBound: $playerVM.startPlayingAt,
             upperBound: $playerVM.endPlayingAt,
-            in: 0.0 ... playerVM.duration
-        ) { isEditing in
-            playerVM.isEditingCurrentTime = isEditing
-        }
-        .frame(width: maxWidth, height: seekerHeight)
+            in: 0.0 ... playerVM.duration,
+            onEditingChanged: rangeSliderEdited(isEditing:)
+        )
+        .frame(width: maxWidth)
         .rangeSliderStyle(rangeSliderStyle)
     }
 
@@ -67,6 +66,7 @@ public struct VideoSliderView: View {
             thumb: valueSliderThumb,
             lowerThumb: sliderThumb,
             upperThumb: sliderThumb,
+            thumbOverlay: overlayTime,
             thumbSize: CGSize(width: 8, height: 60),
             lowerThumbSize: thumbSize,
             upperThumbSize: thumbSize,
@@ -107,36 +107,51 @@ public struct VideoSliderView: View {
         }
     }
 
-//    var overlayTime: some View {
-//        Text(getTime(from: playerVM.currentTime))
-//            .foregroundColor(.orange)
-//            .fixedSize(horizontal: true, vertical: false)
-//        //            .grayBackgroundRound()
-//            .offset(y: -40)
-//            .opacity(isShowingSeekerTime ? 1 : 0)
-//    }
-//
-//    var oneSecondInOffset: CGFloat {
-//        let percentage: CGFloat = CGFloat(1 / videoUtil.assetDuration)
-//        let offset = percentage * (maxWidth)
-//        return offset
-//    }
-//
-//    private func getTime(from value: Double) -> String {
-//        if value < 60 {
-//            return "\(Int(value.rounded())) s"
-//        } else if value < 60 * 60 {
-//            let minutes = value / 60
-//            let minutesIntDouble = Double(Int(minutes))
-//            let seconds = (minutes - minutesIntDouble) * 60
-//            return "\(Int(minutes)) m \(Int(seconds.rounded())) s"
-//        } else {
-//            let hour = value / (60 * 60)
-//            let hourIntDouble = Double(Int(hour))
-//            let minutes = (hour - hourIntDouble) * 60
-//            let minutesIntDouble = Double(Int(minutes))
-//            let seconds = (minutes - minutesIntDouble) * 60
-//            return "\(Int(hour)) h \(Int(minutes)) m \(Int(seconds.rounded()))s"
-//        }
-//    }
+    var overlayTime: some View {
+        Group {
+            if isShowingSeekerTime {
+                Text(getTime(from: playerVM.currentTime))
+                    .foregroundColor(.orange)
+                    .grayBackgroundRound()
+            } else {
+                EmptyView()
+            }
+        }
+    }
+
+    private func rangeSliderEdited(isEditing: Bool) {
+        playerVM.isEditingCurrentTime = isEditing
+        if isEditing {
+            withAnimation {
+                isShowingSeekerTime = true
+            }
+        } else {
+            timer?.invalidate()
+            timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { _ in
+                withAnimation {
+                    isShowingSeekerTime = false
+                }
+            }
+        }
+    }
+
+    private func getTime(from value: Double) -> String {
+        withAnimation {
+            if value < 60 {
+                return "\(Int(value.rounded())) s"
+            } else if value < 60 * 60 {
+                let minutes = value / 60
+                let minutesIntDouble = Double(Int(minutes))
+                let seconds = (minutes - minutesIntDouble) * 60
+                return "\(Int(minutes)) m \(Int(seconds.rounded())) s"
+            } else {
+                let hour = value / (60 * 60)
+                let hourIntDouble = Double(Int(hour))
+                let minutes = (hour - hourIntDouble) * 60
+                let minutesIntDouble = Double(Int(minutes))
+                let seconds = (minutes - minutesIntDouble) * 60
+                return "\(Int(hour)) h \(Int(minutes)) m \(Int(seconds.rounded()))s"
+            }
+        }
+    }
 }

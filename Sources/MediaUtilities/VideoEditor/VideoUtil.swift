@@ -16,7 +16,6 @@ class VideoUtil: ObservableObject {
     private var asset: AVAsset?
     private var timer: Timer?
     private(set) var exporter: AVAssetExportSession?
-    private var images: [UnifiedImage] = []
 
     var videoURL: URL? {
         didSet {
@@ -116,22 +115,20 @@ class VideoUtil: ObservableObject {
             imgGenerator.maximumSize = CGSize(width: 512, height: 512)
 
             let assetDuration = asset.duration.seconds
-
+            var timeValues: [NSValue] = []
             for index in 1 ... 11 {
-                do {
-                    let timeInSeconds = assetDuration / 10 * Double(index)
-                    let time: CMTime = .init(seconds: timeInSeconds, preferredTimescale: 1000)
-                    let img = try imgGenerator.copyCGImage(at: time, actualTime: nil)
+                let timeInSeconds = assetDuration / 10 * Double(index)
+                let time: CMTime = .init(seconds: timeInSeconds, preferredTimescale: 1000)
+                timeValues.append(time as NSValue)
+            }
+            imgGenerator.generateCGImagesAsynchronously(forTimes: timeValues, completionHandler: {_, cgImage ,_,_,_ in
+                if let img = cgImage {
                     let image = UnifiedImage(cgImage: img)
-                    images.append(image)
-                } catch {
-                    print("Image generation failed with error \(error.localizedDescription)")
+                    DispatchQueue.main.async {
+                        self.videoImageFrames.append(image)
+                    }
                 }
-            }
-
-            DispatchQueue.main.async {
-                self.videoImageFrames = self.images
-            }
+            })
         }
     }
 

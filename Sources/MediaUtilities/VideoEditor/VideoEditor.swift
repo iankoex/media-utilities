@@ -89,9 +89,6 @@ public struct VideoEditor: View {
                 }
             }
             .padding(.top)
-            Button("playPauser") {
-                playerVM.isPlaying.toggle()
-            }
             Spacer()
             if isShowingSlider && !isExportCompletedSuccessfully {
                 VideoSliderView()
@@ -199,6 +196,7 @@ public struct VideoEditor: View {
                initialiseOrResetEditor()
             } else {
                 // delete from storage
+                playerVM.pause()
                 isPresented = false
                 videoURL = nil
                 isPresented = false
