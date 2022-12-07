@@ -32,4 +32,22 @@ public class MediaPicker {
             }
         }
     }
+
+    public static func copyContents(of url: URL, callBack: (URL?, Error?) -> Void) {
+        do {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MediaPicker")
+            if !FileManager.default.fileExists(atPath: directory.path) {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+            }
+            let localURL: URL = directory.appendingPathComponent(url.lastPathComponent)
+
+            if FileManager.default.fileExists(atPath: localURL.path) {
+                try? FileManager.default.removeItem(at: localURL)
+            }
+            try FileManager.default.copyItem(at: url, to: localURL)
+            callBack(localURL, nil)
+        } catch let catchedError {
+            callBack(nil, catchedError)
+        }
+    }
 }

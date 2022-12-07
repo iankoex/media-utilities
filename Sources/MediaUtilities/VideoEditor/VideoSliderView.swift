@@ -70,6 +70,7 @@ public struct VideoSliderView: View {
             thumbSize: CGSize(width: 8, height: 60),
             lowerThumbSize: thumbSize,
             upperThumbSize: thumbSize,
+            thumbInteractiveSize: CGSize(width: 8, height: 60),
             lowerThumbInteractiveSize: thumbSize,
             upperThumbInteractiveSize: thumbSize
         )

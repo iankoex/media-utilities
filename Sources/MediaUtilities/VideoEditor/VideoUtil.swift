@@ -106,6 +106,7 @@ class VideoUtil: ObservableObject {
     }
 
     func generateImageFrames() {
+        videoImageFrames = []
         Task(priority: .background) {
             guard let asset = asset else {
                 return

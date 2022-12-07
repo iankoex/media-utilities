@@ -64,6 +64,9 @@ public struct VideoEditor: View {
         }
         .environmentObject(videoUtil)
         .environmentObject(playerVM)
+        .onChange(of: videoURL) { newValue in
+            initialiseOrResetEditor()
+        }
     }
 
     var videoPlayer: some View {
@@ -257,14 +260,17 @@ public struct VideoEditor: View {
     private func initialiseOrResetEditor() {
         isExportCompletedSuccessfully = false
         isShowingSlider = false
-        if videoUtil.videoURL != videoURL {
-            videoUtil.videoURL = videoURL
-        }
         playerVM.isShowingControls = false
         playerVM.currentTime = .zero
         playerVM.startPlayingAt = .zero
         playerVM.endPlayingAt = .zero
-        playerVM.setCurrentItem(videoURL!)
+        guard let videoURL = videoURL else {
+            return
+        }
+        if videoUtil.videoURL != videoURL {
+            videoUtil.videoURL = videoURL
+        }
+        playerVM.setCurrentItem(videoURL)
         playerVM.play()
     }
 }

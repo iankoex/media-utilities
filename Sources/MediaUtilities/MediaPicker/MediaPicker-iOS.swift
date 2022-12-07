@@ -30,7 +30,7 @@ public extension View {
 
 @available(iOS 14.0, macOS 11, *)
 fileprivate struct MediaPickerWrapper: View {
-    @ObservedObject var viewModel: ViewModel
+    @ObservedObject var viewModel: MediaPickerViewModel
     @Binding var isPresented: Bool
     
     init(
@@ -39,7 +39,7 @@ fileprivate struct MediaPickerWrapper: View {
         allowsMultipleSelection: Bool,
         onCompletion: @escaping (Result<[URL], Error>) -> Void
     ) {
-        let viewModel = ViewModel(onCompletion: onCompletion)
+        let viewModel = MediaPickerViewModel(onCompletion: onCompletion)
         var configuration = PHPickerConfiguration(photoLibrary: .shared())
         configuration.selectionLimit = allowsMultipleSelection ? 0 : 1
         configuration.filter = PHPickerFilter.from(allowedMediaTypes)
@@ -73,7 +73,7 @@ fileprivate struct MediaPickerWrapper: View {
 
 @available(iOS 14.0, macOS 11, *)
 fileprivate struct MediaPickerRepresentable: UIViewControllerRepresentable {
-    @ObservedObject var viewModel: ViewModel
+    @ObservedObject var viewModel: MediaPickerViewModel
     @Binding var isPresented: Bool
     
     func makeUIViewController(context: Context) -> PHPickerViewController {

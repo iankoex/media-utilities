@@ -11,7 +11,7 @@ import PhotosUI
 import SwiftUI
 
 @available(iOS 14.0, macOS 11, *)
-class ViewModel: ObservableObject {
+class MediaPickerViewModel: ObservableObject {
     var onCompletion: (Result<[URL], Error>) -> Void
     var configuration: PHPickerConfiguration = PHPickerConfiguration(photoLibrary: .shared())
     var allowedContentTypes: [UTType] = []
@@ -57,23 +57,15 @@ class ViewModel: ObservableObject {
     }
     
     private func copyFile(from url: URL) {
-        do {
-            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MediaPicker")
-            if !FileManager.default.fileExists(atPath: directory.path) {
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+        MediaPicker.copyContents(of: url) { localURL, error in
+            guard let localURL = localURL, error == nil else {
+                DispatchQueue.main.async {
+                    self.errors.append(error!)
+                }
+                return
             }
-            let localURL: URL = directory.appendingPathComponent(url.lastPathComponent)
-            
-            if FileManager.default.fileExists(atPath: localURL.path) {
-                try? FileManager.default.removeItem(at: localURL)
-            }
-            try FileManager.default.copyItem(at: url, to: localURL)
             DispatchQueue.main.async {
                 self.pathURLs.append(localURL)
-            }
-        } catch let catchedError {
-            DispatchQueue.main.async {
-                self.errors.append(catchedError)
             }
         }
     }
