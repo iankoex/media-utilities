@@ -11,9 +11,9 @@ import SwiftUI
 public struct VideoEditor: View {
     @Binding var isPresented: Bool
     @Binding var videoURL: URL?
-    @Binding var finalVideoURL: URL?
+    var onCompletion: (URL?, Error?) -> Void
 
-    // callbacks for done and cancel buttons
+    // onCompletions for done and cancel buttons
     // before done set the statusBar to default
     //    @Environment(\.scenePhase) var scenePhase
     @StateObject private var videoUtil: VideoUtil = VideoUtil()
@@ -28,10 +28,10 @@ public struct VideoEditor: View {
     }
     @State private var exportedVideoURL: URL? = nil
 
-    public init(isPresented: Binding<Bool>, videoURL: Binding<URL?>, finalVideoURL: Binding<URL?>) {
+    public init(isPresented: Binding<Bool>, videoURL: Binding<URL?>, onCompletion: @escaping (URL?, Error?) -> Void) {
         self._isPresented = isPresented
         self._videoURL = videoURL
-        self._finalVideoURL = finalVideoURL
+        self.onCompletion = onCompletion
     }
 
 //    var convinienceVideoURL: URL {
@@ -212,7 +212,7 @@ public struct VideoEditor: View {
 
     private func doneButtonActions() {
         if isExportCompletedSuccessfully {
-            finalVideoURL = exportedVideoURL
+            onCompletion(exportedVideoURL, nil)
             withAnimation {
                 isPresented = false
             }
@@ -232,7 +232,7 @@ public struct VideoEditor: View {
                     from: playerVM.startPlayingAt,
                     to: playerVM.endPlayingAt,
                     with: .presetHighestQuality,
-                    callback: exportCompleted(_:)
+                    onCompletion: exportCompleted(_:)
                 )
             }
         }
@@ -253,7 +253,7 @@ public struct VideoEditor: View {
             withAnimation {
                 isExporting = false
             }
-            print(error)
+            onCompletion(nil, error)
         }
     }
 

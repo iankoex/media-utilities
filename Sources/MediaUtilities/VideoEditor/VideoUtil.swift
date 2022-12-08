@@ -28,10 +28,10 @@ class VideoUtil: ObservableObject {
         asset?.duration.seconds ?? 0
     }
 
-    func trim(from preferredStartTime: Double, to preferredEndTime: Double, with preset: Quality, callback: @escaping (_ result: Result) -> Void) {
+    func trim(from preferredStartTime: Double, to preferredEndTime: Double, with preset: Quality, onCompletion: @escaping (_ result: Result) -> Void) {
 //        check if the asset is an online video or a local one if one dowload it first else the exporter will fail
         guard let asset = asset else {
-            callback(.error("asset not set, asset is nil"))
+            onCompletion(.error(.assetNotSet))
             return
         }
 
@@ -39,7 +39,7 @@ class VideoUtil: ObservableObject {
         exporter = AVAssetExportSession(asset: asset, presetName: preset.value)
 
         guard let exporter = exporter else {
-            callback(.error("exporter INIT FAILED"))
+            onCompletion(.error(.exporterInitFailed))
             return
         }
 
@@ -58,16 +58,16 @@ class VideoUtil: ObservableObject {
         exporter.exportAsynchronously {
             if exporter.status == .completed {
                 DispatchQueue.main.async {
-                    callback(.success(outputVideoURL))
+                    onCompletion(.success(outputVideoURL))
                 }
             }
         }
-        observeExporter(callback: callback)
+        observeExporter(callback: onCompletion)
     }
 
     func observeExporter(callback: @escaping (_ result: Result) -> Void) {
         guard let exporter = exporter else {
-            callback(.error("exporter INIT FAILED"))
+            callback(.error(.exporterInitFailed))
             return
         }
         timer?.invalidate()
@@ -78,10 +78,10 @@ class VideoUtil: ObservableObject {
             if exporter.status == .completed || exporter.status == .failed || exporter.status == .cancelled {
                 self.timer?.invalidate()
                 if exporter.status == .cancelled {
-                    callback(.error("exporter was cancelled"))
+                    callback(.error(.exporterCancelled))
                 }
                 if exporter.status == .failed {
-                    callback(.error("exporter Failed"))
+                    callback(.error(.exporterFailed))
                 }
             }
         }
@@ -159,7 +159,14 @@ class VideoUtil: ObservableObject {
 extension VideoUtil {
     enum Result {
         case success(_ videoURL: URL)
-        case error(_ errorString: String)
+        case error(_ error: VideoUtilError)
+    }
+
+    enum VideoUtilError: Error {
+        case assetNotSet
+        case exporterInitFailed
+        case exporterCancelled
+        case exporterFailed
     }
 
     enum Quality {
