@@ -16,24 +16,21 @@ import AVKit
  conforming pathExtension.
  */
 
-@available(iOS 14.0, macOS 11, *)
+@available(iOS 13.4, macOS 10.15, *)
 struct VideoDropDelegate: DropDelegate {
-    @Binding var isActive: Bool
-    @Binding var isValidated: Bool
-    @Binding var isAllowed: Bool
-    var isGuarded: Bool
-    var dropCompleted: (URL?, Error?) -> Void
+    @ObservedObject var dropService: DropDelegateService
+    var dropCompleted: (Result<URL, Error>) -> Void
 
     func dropEntered(info: DropInfo) {
         withAnimation {
-            isActive = true
+            dropService.isActive = true
         }
     }
 
     func dropExited(info: DropInfo) {
         withAnimation {
-            isActive = false
-            isValidated = false
+            dropService.isActive = false
+            dropService.isValidated = false
         }
     }
 
@@ -42,18 +39,16 @@ struct VideoDropDelegate: DropDelegate {
     }
 
     func validateDrop(info: DropInfo) -> Bool {
-        guard isGuarded == false else {
-            dropCompleted(nil, DropDelegateError.isGuarded)
+        guard dropService.isGuarded == false else {
             return false
         }
-        guard let itemProvider = info.itemProviders(for: [.audiovisualContent, .url, .fileURL]).first else {
-            dropCompleted(nil, DropDelegateError.lacksConformingTypeIdentifiers)
+        guard let itemProvider = info.itemProviders(for: DropDelegateService.audioVisualIdentifiers).first else {
             return false
         }
-        if itemProvider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+        if itemProvider.hasItemConformingToTypeIdentifier(DropDelegateService.urlIndentifier) {
             print("has url")
 
-            itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.url.identifier) { data, _ in
+            itemProvider.loadDataRepresentation(forTypeIdentifier: DropDelegateService.urlIndentifier) { data, _ in
                 guard let data = data, let path = NSString(data: data, encoding: 4), let url = URL(string: path as String) else {
                     print("ER")
                     return
@@ -62,58 +57,43 @@ struct VideoDropDelegate: DropDelegate {
                 let asset = AVAsset(url: url)
                 if asset.isPlayable {
                     print("Conforms")
-                    isAllowed = true
+                    dropService.setIsAllowed(to: true)
                 } else {
                     print("Does Not CONFORM")
-                    isAllowed = false
+                    dropService.setIsAllowed(to: false)
                 }
             }
-        } else if itemProvider.hasItemConformingToTypeIdentifier(UTType.audiovisualContent.identifier) {
+        } else if itemProvider.hasItemConformingToTypeIdentifier(DropDelegateService.audioVisualContentIndentifier) {
             print("Has audsio visual")
-
-            itemProvider.loadFileRepresentation(forTypeIdentifier: UTType.audiovisualContent.identifier) { url, err in
-                guard let url = url, err == nil else {
-                    print("we Found Errors")
-                    return
-                }
-                print(url, "::::")
-                let asset = AVAsset(url: url)
-                if asset.isPlayable {
-                    print("Conforms")
-                    isAllowed = true
-                } else {
-                    print("Does Not CONFORM")
-                    isAllowed = false
-                }
-            }
+            dropService.isAllowed = true
         }
-        isValidated = true
+        dropService.isValidated = true
         return true
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        guard isGuarded == false else {
-            dropCompleted(nil, DropDelegateError.isGuarded)
+        guard dropService.isGuarded == false else {
+            dropCompleted(.failure(DropDelegateError.isGuarded))
             return false
         }
 //        guard isAllowed else {
 //            return false
 //        }
-        guard let itemProvider = info.itemProviders(for: [.audiovisualContent, .url, .fileURL]).first else {
-            dropCompleted(nil, DropDelegateError.lacksConformingTypeIdentifiers)
+        guard let itemProvider = info.itemProviders(for: DropDelegateService.audioVisualIdentifiers).first else {
+            dropCompleted(.failure(DropDelegateError.lacksConformingTypeIdentifiers))
             return false
         }
-        if itemProvider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+        if itemProvider.hasItemConformingToTypeIdentifier(DropDelegateService.urlIndentifier) {
             Task {
                 #if os(iOS)
-                let nsSecureCoding = try await itemProvider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil)
+                let nsSecureCoding = try await itemProvider.loadItem(forTypeIdentifier: DropDelegateService.urlIndentifier, options: nil)
                 if let urlData = nsSecureCoding as? Data {
                     let str = try? JSONDecoder().decode(URL.self, from: urlData)
                     print(str, "URLLLL")
                 }
                 #endif
                 #if os(macOS)
-                let nsSecureCoding = try await itemProvider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil)
+                let nsSecureCoding = try await itemProvider.loadItem(forTypeIdentifier: DropDelegateService.urlIndentifier, options: nil)
                 guard let urlData = nsSecureCoding as? Data else {
                     return
                 }
@@ -121,35 +101,54 @@ struct VideoDropDelegate: DropDelegate {
                 print(url, "URLLLL")
                 let asset = AVAsset(url: url)
                 if asset.isPlayable {
-                    dropCompleted(url, nil)
+                    dropCompleted(.success(url))
                 } else {
-                    dropCompleted(url, DropDelegateError.lacksAudioVisualContent)
+                    dropCompleted(.failure(DropDelegateError.lacksAudioVisualContent))
                 }
                 #endif
             }
-        } else if itemProvider.hasItemConformingToTypeIdentifier(UTType.audiovisualContent.identifier) {
+        } else if itemProvider.hasItemConformingToTypeIdentifier(DropDelegateService.audioVisualContentIndentifier) {
             print("audiovisualContentaudiovisualContent")
-            itemProvider.loadFileRepresentation(forTypeIdentifier: UTType.audiovisualContent.identifier) { url, err in
+            itemProvider.loadFileRepresentation(forTypeIdentifier: DropDelegateService.audioVisualContentIndentifier) { url, err in
                 guard let url = url, err == nil else {
                     print("we Foudn Errord")
+                    dropCompleted(.failure(err!))
                     return
                 }
                 print(url, "::::")
                 MediaPicker.copyContents(of: url) { localURL, error in
                     guard let localURL = localURL, error == nil else {
                         print("Error Copying")
-                        dropCompleted(localURL, error)
+                        dropCompleted(.failure(error!))
                         return
                     }
                     print("localURl", localURL)
-                    dropCompleted(localURL, nil)
+                    dropCompleted(.success(localURL))
                 }
             }
         } else {
-            dropCompleted(nil, DropDelegateError.lacksConformingTypeIdentifiers)
+            dropCompleted(.failure(DropDelegateError.lacksConformingTypeIdentifiers))
             return false
         }
-        isValidated = false
+        dropService.isValidated = false
         return true
     }
 }
+
+/*
+ itemProvider.loadFileRepresentation(forTypeIdentifier: UTType.audiovisualContent.identifier) { url, err in
+     guard let url = url, err == nil else {
+         print("we Found Errors")
+         return
+     }
+     print(url, "::::")
+     let asset = AVAsset(url: url)
+     if asset.isPlayable {
+         print("Conforms")
+         dropService.setIsAllowed(to: true)
+     } else {
+         print("Does Not CONFORM")
+         dropService.setIsAllowed(to: false)
+     }
+ }
+ */

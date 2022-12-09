@@ -24,3 +24,21 @@ struct GrayBackgroundRound: ViewModifier {
             .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
+
+@available(iOS 13.0, macOS 10.15, *)
+extension View {
+    func grayBackgroundCircle() -> some View {
+        modifier(GrayBackgroundCircle())
+    }
+}
+
+@available(iOS 13.0, macOS 10.15, *)
+struct GrayBackgroundCircle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 5)
+            .padding(.vertical, 5)
+            .background(Color.gray.opacity(0.3))
+            .clipShape(Circle())
+    }
+}

@@ -42,7 +42,7 @@ public class VideoDownloader: NSObject, ObservableObject {
         downloadTask?.cancel()
     }
 
-    public func cleanUp() {
+    public func reset() {
         finalURL = nil
         downloadedDataSize = ""
         totalDataSize = ""
@@ -71,7 +71,7 @@ extension VideoDownloader: URLSessionDownloadDelegate {
                 print(error.localizedDescription)
             }
         }
-        let localURL: URL = directory.appendingPathComponent("downloadedVideo.mp4")
+        let localURL: URL = directory.appendingPathComponent("downloadedVideo\(UUID()).mp4")
         if FileManager.default.fileExists(atPath: localURL.path) {
             try? FileManager.default.removeItem(at: localURL)
         }
@@ -81,7 +81,7 @@ extension VideoDownloader: URLSessionDownloadDelegate {
         } catch {
             print(error.localizedDescription)
         }
-        print(localURL, "Local URLL")
+        print(localURL, "VideoDownloader Local URLL")
         DispatchQueue.main.async {
             self.finalURL = localURL
         }

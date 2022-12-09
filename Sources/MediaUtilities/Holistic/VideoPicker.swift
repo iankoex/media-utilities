@@ -14,7 +14,7 @@ extension View {
     }
 }
 
-@available(iOS 15.0, macOS 12, *)
+@available(iOS 14.0, macOS 11, *)
 public struct VideoPicker: ViewModifier {
     @Binding var isPresented: Bool // Directly Controlls the MediaPicker
     var onCompletion: (URL?, Error?) -> Void
@@ -23,14 +23,11 @@ public struct VideoPicker: ViewModifier {
         self._isPresented = isPresented
         self.onCompletion = onCompletion
     }
-    
-    @State private var isActive: Bool = false
+
     @State private var pickedVideoURL: URL? = nil
-    @State private var isShowingVideoTrimmer: Bool = false // will be true if drop was Successful
-    @State private var isDropAllowed: Bool = false
-    @State private var isDropValidated: Bool = false
-    @State private var attempts: CGFloat = 0
+    @State private var isShowingVideoEditor: Bool = false // will be true if drop was Successful
     @StateObject private var downloader: VideoDownloader = .init()
+    @StateObject private var dropService: DropDelegateService = .init()
 
     public func body(content: Content) -> some View {
         videoPickerContents(content)
@@ -38,19 +35,14 @@ public struct VideoPicker: ViewModifier {
 
     func videoPickerContents(_ content: Content) -> some View {
         content
-            .interactiveDismissDisabled(isPresented)
+            .blur(radius: blurRadius, opaque: true)
             .overlay {
-                if isActive {
-                    overlayContentView
-                }
-            }
-            .overlay {
-                if isActive, isDropValidated {
+                if dropService.isActive, dropService.isValidated {
                     dropAllowedView
                 }
             }
             .overlay {
-                if isShowingVideoTrimmer {
+                if isShowingVideoEditor {
                     successfulDropView
                         .zIndex(1)
                 }
@@ -58,20 +50,10 @@ public struct VideoPicker: ViewModifier {
             .onDrop(
                 of: [.url, .fileURL, .audiovisualContent],
                 delegate: VideoDropDelegate(
-                    isActive: $isActive,
-                    isValidated: $isDropValidated,
-                    isAllowed: $isDropAllowed,
-                    isGuarded: false,
-                    dropCompleted: dropCompleted(_: error:)
+                    dropService: dropService,
+                    dropCompleted: dropCompleted(_:)
                 )
             )
-            .onChange(of: isDropValidated) { _ in
-                if isDropAllowed == false {
-                    withAnimation {
-                        attempts += 1
-                    }
-                }
-            }
             .mediaPicker(
                 isPresented: $isPresented,
                 allowedMediaTypes: MediaTypeOptions.videos,
@@ -80,36 +62,35 @@ public struct VideoPicker: ViewModifier {
             )
     }
 
-    var overlayContentView: some View {
-        VStack {
-            Spacer()
-            HStack {
-                Spacer()
-            }
+    var blurRadius: CGFloat {
+        guard !dropService.isActive else {
+            return 10
         }
-        .background(.ultraThinMaterial)
+        if pickedVideoURL != nil, !pickedVideoURL!.isFileURL {
+            return 10
+        }
+        return 0
     }
 
     var dropAllowedView: some View {
         Group {
-            if isDropAllowed {
+            if dropService.isAllowed {
                 Image(systemName: "hand.thumbsup.circle")
             } else {
                 Image(systemName: "xmark.circle")
-                    .modifier(Shake(animatableData: attempts))
+                    .modifier(Shake(animatableData: dropService.attempts))
             }
         }
-        .symbolRenderingMode(.hierarchical)
-        .foregroundColor(.teal)
-        .font(.system(size: 100))
-        .padding()
+        .foregroundColor(dropService.isAllowed ? .accentColor : .red)
+        .font(.system(size: 50))
+        .grayBackgroundCircle()
     }
 
     var successfulDropView: some View {
         Group {
             if pickedVideoURL != nil {
                 if pickedVideoURL!.isFileURL {
-                    VideoEditor(isPresented: $isShowingVideoTrimmer, videoURL: $pickedVideoURL, onCompletion: onCompletion)
+                    VideoEditor(isPresented: $isShowingVideoEditor, videoURL: $pickedVideoURL, onCompletion: onCompletion)
                 } else {
                     downloadingView
                 }
@@ -129,10 +110,10 @@ public struct VideoPicker: ViewModifier {
             Button(action: {
                 downloader.cancelDownload()
                 withAnimation {
-                    isShowingVideoTrimmer = false
+                    isShowingVideoEditor = false
                     pickedVideoURL = nil
                 }
-                downloader.cleanUp()
+                downloader.reset()
             }) {
                 Text("Cancel")
             }
@@ -142,33 +123,35 @@ public struct VideoPicker: ViewModifier {
                 Spacer()
             }
         }
-        .background(.ultraThinMaterial)
-        .task {
-            await downloader.downloadVideo(url: pickedVideoURL!)
+        .onAppear {
+            Task {
+                await downloader.downloadVideo(url: pickedVideoURL!)
+            }
         }
         .onChange(of: downloader.finalURL) { _ in
             if downloader.finalURL != nil {
-                print(downloader.finalURL, "FinalURL")
                 pickedVideoURL = downloader.finalURL
-                downloader.cleanUp()
+                downloader.reset()
             }
         }
     }
 
-    private func dropCompleted(_ url: URL?, error: Error?) {
-        guard let url = url, error == nil else {
-            withAnimation {
-                isShowingVideoTrimmer = false
+    private func dropCompleted(_ result: Result<URL, Error>) {
+        switch result {
+        case .success(let url):
+            print("dropCompleted URL \(url)")
+            pickedVideoURL = url
+            DispatchQueue.main.async {
+                withAnimation {
+                    isShowingVideoEditor = true
+                    dropService.isActive = false
+                }
             }
-            onCompletion(url, error)
-            return
-        }
-        print("URL \(url)")
-        pickedVideoURL = url
-        print("pickedVideoURL \(pickedVideoURL)")
-        withAnimation {
-            isShowingVideoTrimmer = true
-            isActive = false
+        case .failure(let err):
+            print("dropCompleted Error \(err)")
+            withAnimation {
+                isShowingVideoEditor = false
+            }
         }
     }
 
@@ -176,9 +159,11 @@ public struct VideoPicker: ViewModifier {
         switch result {
         case let .success(urls):
             print("mediaImportComplete URL: \(urls.first)")
-            pickedVideoURL = urls.first
-            withAnimation {
-                self.isShowingVideoTrimmer = true
+            DispatchQueue.main.async {
+                pickedVideoURL = urls.first
+                withAnimation {
+                    self.isShowingVideoEditor = true
+                }
             }
         case let .failure(error):
             onCompletion(nil, error)
