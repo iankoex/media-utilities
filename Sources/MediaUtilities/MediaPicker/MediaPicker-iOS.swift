@@ -30,8 +30,13 @@ public extension View {
 
 @available(iOS 14.0, macOS 11, *)
 fileprivate struct MediaPickerWrapper: View {
-    @ObservedObject var viewModel: MediaPickerViewModel
+    @State private var isLoading: Bool = false
+    @State private var progress: Progress = Progress()
+
+    var configuration = PHPickerConfiguration(photoLibrary: .shared())
     @Binding var isPresented: Bool
+    var allowedContentTypes: [UTType]
+    var onCompletion: (Result<[URL], Error>) -> Void
     
     init(
         isPresented: Binding<Bool>,
@@ -39,46 +44,57 @@ fileprivate struct MediaPickerWrapper: View {
         allowsMultipleSelection: Bool,
         onCompletion: @escaping (Result<[URL], Error>) -> Void
     ) {
-        let viewModel = MediaPickerViewModel(onCompletion: onCompletion)
-        var configuration = PHPickerConfiguration(photoLibrary: .shared())
         configuration.selectionLimit = allowsMultipleSelection ? 0 : 1
         configuration.filter = PHPickerFilter.from(allowedMediaTypes)
-        configuration.preferredAssetRepresentationMode = .current
-        viewModel.configuration = configuration
-        viewModel.allowedContentTypes = allowedMediaTypes.typeIdentifiers
-        
-        self.viewModel = viewModel
+        configuration.preferredAssetRepresentationMode = .compatible
+
         self._isPresented = isPresented
+        self.allowedContentTypes = allowedMediaTypes.typeIdentifiers
+        self.onCompletion = onCompletion
     }
     
     var body: some View {
-        MediaPickerRepresentable(viewModel: viewModel, isPresented: $isPresented)
-            .overlay(viewModel.isLoading ? loadingView : nil)
+        MediaPickerRepresentable(
+            configuration: configuration,
+            isPresented: $isPresented,
+            isLoading: $isLoading,
+            progress: $progress,
+            allowedContentTypes: allowedContentTypes,
+            onCompletion: onCompletion
+        )
+        .overlay(isLoading ? loadingView : nil)
+        .onDisappear {
+            progress.cancel()
+        }
+
     }
     
     var loadingView: some View {
         NavigationView {
-            ProgressView(viewModel.progress)
+            ProgressView(progress)
                 .progressViewStyle(.linear)
                 .padding()
                 .navigationTitle("Importing Media...")
         }
         .transition(.move(edge: .bottom).combined(with: .opacity))
-        .onChange(of: viewModel.progress.isFinished) { _ in
-            viewModel.finaliseResults()
-            isPresented = false
-        }
     }
 }
 
 @available(iOS 14.0, macOS 11, *)
 fileprivate struct MediaPickerRepresentable: UIViewControllerRepresentable {
-    @ObservedObject var viewModel: MediaPickerViewModel
+    var configuration: PHPickerConfiguration
     @Binding var isPresented: Bool
+    @Binding var isLoading: Bool
+    @Binding var progress: Progress
+    var allowedContentTypes: [UTType]
+    var onCompletion: (Result<[URL], Error>) -> Void
+
     
     func makeUIViewController(context: Context) -> PHPickerViewController {
-        let controller = PHPickerViewController(configuration: viewModel.configuration)
+        let controller = PHPickerViewController(configuration: configuration)
         controller.delegate = context.coordinator
+
+        
         return controller
     }
     
@@ -92,7 +108,9 @@ fileprivate struct MediaPickerRepresentable: UIViewControllerRepresentable {
     
     class Coordinator: PHPickerViewControllerDelegate {
         let parent: MediaPickerRepresentable
-        
+        var pathURLs: [URL] = []
+        var error: Error?
+
         init(_ picker: MediaPickerRepresentable) {
             self.parent = picker
         }
@@ -102,7 +120,73 @@ fileprivate struct MediaPickerRepresentable: UIViewControllerRepresentable {
                 parent.isPresented = false
                 return
             }
-            parent.viewModel.handleResults(for: results)
+            handleResults(for: results)
+        }
+
+        var filesProgressCount: Int = 0 {
+            didSet {
+                if filesProgressCount == 0 {
+                    finaliseResults()
+                }
+            }
+        }
+
+        private func handleResults(for results: [PHPickerResult]) {
+            withAnimation {
+                parent.isLoading = true
+            }
+            parent.progress.totalUnitCount = Int64(results.count)
+            for result in results {
+                let contentTypes = parent.allowedContentTypes
+                for contentType in contentTypes {
+                    let itemProvider = result.itemProvider
+                    if itemProvider.hasItemConformingToTypeIdentifier(contentType.identifier) {
+                        loadFile(for: itemProvider, ofType: contentType)
+                        filesProgressCount += 1
+                    }
+                }
+            }
+        }
+
+        private func loadFile(for itemProvider: NSItemProvider, ofType contentType: UTType) {
+            let progress: Progress? = itemProvider.loadFileRepresentation(forTypeIdentifier: contentType.identifier) { url, error in
+                guard let url = url, error == nil else {
+
+                    return
+                }
+                self.copyFile(from: url)
+            }
+            if let progress = progress {
+                parent.progress.addChild(progress, withPendingUnitCount: 1)
+            }
+        }
+
+        private func copyFile(from url: URL) {
+            MediaPicker.copyContents(of: url) { localURL, error in
+                guard let localURL = localURL, error == nil else {
+                    self.error = error
+                    return
+                }
+                DispatchQueue.main.async {
+                    self.pathURLs.append(localURL)
+                    self.filesProgressCount -= 1
+                }
+
+            }
+        }
+
+        func finaliseResults() {
+            withAnimation {
+                parent.isLoading = false
+            }
+            if pathURLs.isEmpty {
+                if let err = error {
+                    parent.onCompletion(.failure(err))
+                }
+            } else {
+                parent.onCompletion(.success(pathURLs))
+            }
+            parent.isPresented = false
         }
     }
 }
