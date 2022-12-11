@@ -149,16 +149,14 @@ fileprivate struct MediaPickerRepresentable: UIViewControllerRepresentable {
         }
 
         private func loadFile(for itemProvider: NSItemProvider, ofType contentType: UTType) {
-            let progress: Progress? = itemProvider.loadFileRepresentation(forTypeIdentifier: contentType.identifier) { url, error in
+            let progress: Progress = itemProvider.loadFileRepresentation(forTypeIdentifier: contentType.identifier) { url, error in
                 guard let url = url, error == nil else {
 
                     return
                 }
                 self.copyFile(from: url)
             }
-            if let progress = progress {
-                parent.progress.addChild(progress, withPendingUnitCount: 1)
-            }
+            parent.progress.addChild(progress, withPendingUnitCount: 1)
         }
 
         private func copyFile(from url: URL) {

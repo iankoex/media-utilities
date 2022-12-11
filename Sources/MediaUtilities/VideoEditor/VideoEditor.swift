@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-@available(iOS 15.0, macOS 12, *)
+@available(iOS 14.0, macOS 11, *)
 public struct VideoEditor: View {
     @Binding var isPresented: Bool
     @Binding var videoURL: URL?
@@ -107,9 +107,9 @@ public struct VideoEditor: View {
             if isExportCompletedSuccessfully {
                 Text("Edit")
             } else {
-                Image(systemName: "xmark.circle.fill")
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.largeTitle)
+                Image(systemName: "xmark.circle")
+                    .font(.title2)
+                    .grayBackgroundCircle()
             }
         }
     }
@@ -118,30 +118,27 @@ public struct VideoEditor: View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 15) {
                 doneButton
-                controlButton(audioControlTitle, image: audioControlImage) {
+                controlButton(audioControlImage) {
                     withAnimation {
                         playerVM.isMuted.toggle()
                     }
                 }
-                controlButton("Trim", image: "timeline.selection") {
+                controlButton("timeline.selection") {
                     withAnimation {
                         isShowingSlider.toggle()
                     }
                 }
             }
         }
+        .frame(maxWidth: 50)
     }
 
     var doneButton: some View {
-        controlButton("Done", image: "checkmark.circle.fill", action: doneButtonActions)
-    }
-
-    var audioControlTitle: String {
-        "Audio \(playerVM.isMuted ? "on" : "off")"
+        controlButton("checkmark.circle", action: doneButtonActions)
     }
 
     var audioControlImage: String {
-        playerVM.isMuted ? "speaker.circle" : "speaker.slash.circle"
+        playerVM.isMuted ? "speaker" : "speaker.slash"
     }
 
     var exportingOverlay: some View {
@@ -170,23 +167,19 @@ public struct VideoEditor: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
-    private func controlButton(_ name: String, image: String, action: @escaping () -> Void) -> some View {
+    private func controlButton(_ image: String, action: @escaping () -> Void) -> some View {
         HStack(spacing: 0) {
             Spacer()
             Button(action: action) {
-                HStack {
-                    if isShowingControlButtonNames {
-                        Text(name)
-                    }
-                    HStack(spacing: 0) {
-                        Spacer(minLength: 1)
-                        Image(systemName: image)
-                            .symbolRenderingMode(.hierarchical)
-                            .font(.largeTitle)
-                        Spacer(minLength: 1)
-                    }
-                    .frame(maxWidth: 45)
+                HStack(spacing: 0) {
+                    Spacer(minLength: 1)
+                    Image(systemName: image)
+                        .font(.title2)
+                        .padding(1)
+                        .grayBackgroundCircle()
+                    Spacer(minLength: 1)
                 }
+                .frame(maxWidth: 50)
             }
             .buttonStyle(.plain)
             .foregroundColor(.white)

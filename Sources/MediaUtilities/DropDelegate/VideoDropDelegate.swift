@@ -8,7 +8,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import AVFoundation
-import AVKit
+//import AVKit
+import Combine
 
 /*
   The use of AVAsset here is to enable the drag and drop
@@ -20,6 +21,7 @@ import AVKit
 struct VideoDropDelegate: DropDelegate {
     @ObservedObject var dropService: DropDelegateService
     var dropCompleted: (Result<URL, Error>) -> Void
+    @State private var subscriptions: Set<AnyCancellable> = []
 
     func dropEntered(info: DropInfo) {
         withAnimation {
@@ -109,7 +111,7 @@ struct VideoDropDelegate: DropDelegate {
             }
         } else if itemProvider.hasItemConformingToTypeIdentifier(DropDelegateService.audioVisualContentIndentifier) {
             print("audiovisualContentaudiovisualContent")
-            itemProvider.loadFileRepresentation(forTypeIdentifier: DropDelegateService.audioVisualContentIndentifier) { url, err in
+            let progress: Progress = itemProvider.loadFileRepresentation(forTypeIdentifier: DropDelegateService.audioVisualContentIndentifier) { url, err in
                 guard let url = url, err == nil else {
                     print("we Foudn Errord")
                     dropCompleted(.failure(err!))
@@ -126,6 +128,20 @@ struct VideoDropDelegate: DropDelegate {
                     dropCompleted(.success(localURL))
                 }
             }
+            // Monotor isCancelled for the case of importing from Photos.app
+            progress.publisher(for: \.fractionCompleted)
+                .sink { fractionCompleted in
+                    print("fractionCompleted", fractionCompleted)
+//                    dropCompleted(.failure(DropDelegateError.lacksConformingTypeIdentifiers))
+                }
+                .store(in: &subscriptions)
+            progress.publisher(for: \.isCancelled)
+                .filter( { $0 == true })
+                .sink { isCancelled in
+                    print("isCancelled", isCancelled)
+//                    dropCompleted(.failure(DropDelegateError.lacksConformingTypeIdentifiers))
+                }
+                .store(in: &subscriptions)
         } else {
             dropCompleted(.failure(DropDelegateError.lacksConformingTypeIdentifiers))
             return false

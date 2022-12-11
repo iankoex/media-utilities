@@ -18,8 +18,7 @@ extension View {
 struct GrayBackgroundRound: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .padding(.horizontal, 5)
-            .padding(.vertical, 5)
+            .padding(5)
             .background(Color.gray.opacity(0.3))
             .clipShape(RoundedRectangle(cornerRadius: 10))
     }
@@ -36,8 +35,7 @@ extension View {
 struct GrayBackgroundCircle: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .padding(.horizontal, 5)
-            .padding(.vertical, 5)
+            .padding(5)
             .background(Color.gray.opacity(0.3))
             .clipShape(Circle())
     }
