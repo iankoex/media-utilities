@@ -16,6 +16,7 @@ extension View {
 
 @available(iOS 14.0, macOS 11, *)
 public struct VideoPicker: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var isPresented: Bool // Directly Controlls the MediaPicker
     var onCompletion: (URL?, Error?) -> Void
 
@@ -40,14 +41,19 @@ public struct VideoPicker: ViewModifier {
 //                }
 //            }
             .overlay {
-                if dropService.isActive, dropService.isValidated {
-                    dropAllowedView
-                }
-            }
-            .overlay {
                 if isShowingVideoEditor {
                     successfulDropView
                         .zIndex(1)
+                }
+            }
+            .overlay {
+                if dropService.isCopyingFile {
+                    copyingFileView
+                }
+            }
+            .overlay {
+                if dropService.isActive, dropService.isValidated {
+                    dropAllowedView
                 }
             }
             .onDrop(
@@ -89,6 +95,24 @@ public struct VideoPicker: ViewModifier {
                 }
             }
         }
+    }
+
+    var copyingFileView: some View {
+        VStack {
+            Spacer()
+            ProgressView(dropService.progress)
+                .progressViewStyle(.linear)
+                .padding()
+            SpinnerView()
+            Text("LOADING...")
+                .font(.caption)
+            Spacer()
+            HStack {
+                Spacer()
+            }
+        }
+        .background(colorScheme == .dark ? Color.black : Color.white)
+        .transition(.move(edge: .bottom))
     }
 
     var downloadingView: some View {

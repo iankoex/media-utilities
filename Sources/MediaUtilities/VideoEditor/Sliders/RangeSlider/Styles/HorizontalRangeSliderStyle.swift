@@ -18,9 +18,6 @@ public struct HorizontalRangeSliderStyle<Track: View, Thumb: View, ThumbOverlay:
 
     private let options: RangeSliderOptions
 
-    let onSelectLower: () -> Void
-    let onSelectUpper: () -> Void
-
     public func makeBody(configuration: Self.Configuration) -> some View {
         GeometryReader { geometry in
             ZStack {
@@ -62,15 +59,10 @@ public struct HorizontalRangeSliderStyle<Track: View, Thumb: View, ThumbOverlay:
                     ),
                     y: geometry.size.height / 2
                 )
-                .onTapGesture {
-                    self.onSelectLower()
-                }
                 .gesture(
                     DragGesture()
                         .onChanged { gestureValue in
                             configuration.onEditingChanged(true)
-
-                            self.onSelectLower()
 
                             if configuration.dragOffset.wrappedValue == nil {
                                 configuration.dragOffset.wrappedValue = gestureValue.startLocation.x - distanceFrom(
@@ -122,15 +114,10 @@ public struct HorizontalRangeSliderStyle<Track: View, Thumb: View, ThumbOverlay:
                     ),
                     y: geometry.size.height / 2
                 )
-                .onTapGesture {
-                    self.onSelectUpper()
-                }
                 .gesture(
                     DragGesture()
                         .onChanged { gestureValue in
                             configuration.onEditingChanged(true)
-
-                            self.onSelectUpper()
 
                             if configuration.dragOffset.wrappedValue == nil {
                                 configuration.dragOffset.wrappedValue = gestureValue.startLocation.x - distanceFrom(
@@ -221,7 +208,7 @@ public struct HorizontalRangeSliderStyle<Track: View, Thumb: View, ThumbOverlay:
         .frame(minHeight: max(self.lowerThumbInteractiveSize.height, self.upperThumbInteractiveSize.height))
     }
 
-    public init(track: Track, thumb: Thumb, lowerThumb: LowerThumb, upperThumb: UpperThumb, thumbOverlay: ThumbOverlay, thumbSize: CGSize = CGSize(width: 27, height: 27), lowerThumbSize: CGSize = CGSize(width: 27, height: 27), upperThumbSize: CGSize = CGSize(width: 27, height: 27), thumbInteractiveSize: CGSize = CGSize(width: 44, height: 44), lowerThumbInteractiveSize: CGSize = CGSize(width: 44, height: 44), upperThumbInteractiveSize: CGSize = CGSize(width: 44, height: 44), options: RangeSliderOptions = .defaultOptions, onSelectLower: @escaping () -> Void = {}, onSelectUpper: @escaping () -> Void = {}) {
+    public init(track: Track, thumb: Thumb, lowerThumb: LowerThumb, upperThumb: UpperThumb, thumbOverlay: ThumbOverlay, thumbSize: CGSize = CGSize(width: 27, height: 27), lowerThumbSize: CGSize = CGSize(width: 27, height: 27), upperThumbSize: CGSize = CGSize(width: 27, height: 27), thumbInteractiveSize: CGSize = CGSize(width: 44, height: 44), lowerThumbInteractiveSize: CGSize = CGSize(width: 44, height: 44), upperThumbInteractiveSize: CGSize = CGSize(width: 44, height: 44), options: RangeSliderOptions = .defaultOptions) {
         self.track = track
         self.thumb = thumb
         self.lowerThumb = lowerThumb
@@ -234,14 +221,12 @@ public struct HorizontalRangeSliderStyle<Track: View, Thumb: View, ThumbOverlay:
         self.lowerThumbInteractiveSize = lowerThumbInteractiveSize
         self.upperThumbInteractiveSize = upperThumbInteractiveSize
         self.options = options
-        self.onSelectLower = onSelectLower
-        self.onSelectUpper = onSelectUpper
     }
 }
 
 @available(iOS 13.0, macOS 10.15, *)
 extension HorizontalRangeSliderStyle where Thumb == DefaultThumb, LowerThumb == DefaultThumb, UpperThumb == DefaultThumb, ThumbOverlay == DefaultThumb, Track == DefaultHorizontalRangeTrack {
-    public init(thumbSize: CGSize = CGSize(width: 27, height: 27), lowerThumbSize: CGSize = CGSize(width: 27, height: 27), upperThumbSize: CGSize = CGSize(width: 27, height: 27), thumbInteractiveSize: CGSize = CGSize(width: 44, height: 44), lowerThumbInteractiveSize: CGSize = CGSize(width: 44, height: 44), upperThumbInteractiveSize: CGSize = CGSize(width: 44, height: 44), options: RangeSliderOptions = .defaultOptions, onSelectLower: @escaping () -> Void = {}, onSelectUpper: @escaping () -> Void = {}) {
+    public init(thumbSize: CGSize = CGSize(width: 27, height: 27), lowerThumbSize: CGSize = CGSize(width: 27, height: 27), upperThumbSize: CGSize = CGSize(width: 27, height: 27), thumbInteractiveSize: CGSize = CGSize(width: 44, height: 44), lowerThumbInteractiveSize: CGSize = CGSize(width: 44, height: 44), upperThumbInteractiveSize: CGSize = CGSize(width: 44, height: 44), options: RangeSliderOptions = .defaultOptions) {
         self.track = DefaultHorizontalRangeTrack()
         self.thumb = DefaultThumb()
         self.lowerThumb = DefaultThumb()
@@ -254,8 +239,6 @@ extension HorizontalRangeSliderStyle where Thumb == DefaultThumb, LowerThumb == 
         self.lowerThumbInteractiveSize = lowerThumbInteractiveSize
         self.upperThumbInteractiveSize = upperThumbInteractiveSize
         self.options = options
-        self.onSelectLower = onSelectLower
-        self.onSelectUpper = onSelectUpper
     }
 }
 

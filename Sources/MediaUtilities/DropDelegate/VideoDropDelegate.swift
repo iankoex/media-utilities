@@ -113,33 +113,33 @@ struct VideoDropDelegate: DropDelegate {
             print("audiovisualContentaudiovisualContent")
             let progress: Progress = itemProvider.loadFileRepresentation(forTypeIdentifier: DropDelegateService.audioVisualContentIndentifier) { url, err in
                 guard let url = url, err == nil else {
-                    print("we Foudn Errord")
                     dropCompleted(.failure(err!))
                     return
                 }
-                print(url, "::::")
                 MediaPicker.copyContents(of: url) { localURL, error in
                     guard let localURL = localURL, error == nil else {
-                        print("Error Copying")
+                        dropService.setIsCopying(to: false)
                         dropCompleted(.failure(error!))
                         return
                     }
                     print("localURl", localURL)
+                    dropService.setIsCopying(to: false)
                     dropCompleted(.success(localURL))
                 }
             }
-            // Monotor isCancelled for the case of importing from Photos.app
-            progress.publisher(for: \.fractionCompleted)
+            dropService.setIsCopying(to: true)
+            dropService.progress.addChild(progress, withPendingUnitCount: 1)
+
+            // Monitor isCancelled for the case of importing from Photos.app
+            dropService.progress.publisher(for: \.fractionCompleted)
                 .sink { fractionCompleted in
                     print("fractionCompleted", fractionCompleted)
-//                    dropCompleted(.failure(DropDelegateError.lacksConformingTypeIdentifiers))
                 }
                 .store(in: &subscriptions)
-            progress.publisher(for: \.isCancelled)
+            dropService.progress.publisher(for: \.isCancelled)
                 .filter( { $0 == true })
                 .sink { isCancelled in
                     print("isCancelled", isCancelled)
-//                    dropCompleted(.failure(DropDelegateError.lacksConformingTypeIdentifiers))
                 }
                 .store(in: &subscriptions)
         } else {

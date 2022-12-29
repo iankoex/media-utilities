@@ -17,6 +17,8 @@ class DropDelegateService: ObservableObject {
     @Published var isAllowed: Bool = false
     @Published var isGuarded: Bool = false
     @Published var attempts: CGFloat = 0
+    @Published var isCopyingFile: Bool = false
+    @Published var progress = Progress()
 
     private func processAttempts() {
         if isAllowed == false {
@@ -30,6 +32,12 @@ class DropDelegateService: ObservableObject {
         DispatchQueue.main.async {
             self.isAllowed = bool
             self.processAttempts()
+        }
+    }
+
+    func setIsCopying(to bool: Bool) {
+        DispatchQueue.main.async {
+            self.isCopyingFile = bool
         }
     }
 

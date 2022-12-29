@@ -34,14 +34,6 @@ public struct VideoEditor: View {
         self.onCompletion = onCompletion
     }
 
-//    var convinienceVideoURL: URL {
-//        if isExportCompletedSuccessfully {
-//            return exportedVideoURL ?? videoURL!
-//        } else {
-//            return videoURL!
-//        }
-//    }
-
     public var body: some View {
         ZStack {
             if videoURL != nil {
@@ -175,13 +167,13 @@ public struct VideoEditor: View {
                     Spacer(minLength: 1)
                     Image(systemName: image)
                         .font(.title2)
-                        .padding(1)
+                        .padding(2)
                         .grayBackgroundCircle()
                     Spacer(minLength: 1)
                 }
                 .frame(maxWidth: 50)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
             .foregroundColor(.white)
         }
     }
