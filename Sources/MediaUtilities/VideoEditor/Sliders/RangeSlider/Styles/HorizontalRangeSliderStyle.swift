@@ -90,7 +90,7 @@ public struct HorizontalRangeSliderStyle<Track: View, Thumb: View, ThumbOverlay:
                                 leadingOffset: self.lowerThumbSize.width / 2,
                                 trailingOffset: self.lowerThumbSize.width / 2
                             )
-                            
+
                             configuration.range.wrappedValue = rangeFrom(
                                 updatedLowerBound: computedLowerBound,
                                 upperBound: configuration.range.wrappedValue.upperBound,
@@ -150,7 +150,7 @@ public struct HorizontalRangeSliderStyle<Track: View, Thumb: View, ThumbOverlay:
                                 leadingOffset: self.lowerThumbSize.width + self.upperThumbSize.width / 2,
                                 trailingOffset: self.upperThumbSize.width / 2
                             )
-                            
+
                             configuration.range.wrappedValue = rangeFrom(
                                 lowerBound: configuration.range.wrappedValue.lowerBound,
                                 updatedUpperBound: computedUpperBound,

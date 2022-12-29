@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-@available(iOS 15.0, macOS 12, *)
+@available(iOS 14.0, macOS 11, *)
 extension View {
     @inlinable public func videoPicker(_ isPresented: Binding<Bool>, onCompletion: @escaping (URL?, Error?) -> Void) -> some View {
         modifier(VideoPicker(isPresented: isPresented, onCompletion: onCompletion))
@@ -30,12 +30,15 @@ public struct VideoPicker: ViewModifier {
     @StateObject private var dropService: DropDelegateService = .init()
 
     public func body(content: Content) -> some View {
-        videoPickerContents(content)
-    }
-
-    func videoPickerContents(_ content: Content) -> some View {
         content
-            .blur(radius: blurRadius, opaque: true)
+//            .overlay {
+//                if dropService.isActive {
+//                    backgroundView
+//                }
+//                if pickedVideoURL != nil, !pickedVideoURL!.isFileURL {
+//                    backgroundView
+//                }
+//            }
             .overlay {
                 if dropService.isActive, dropService.isValidated {
                     dropAllowedView
@@ -60,16 +63,6 @@ public struct VideoPicker: ViewModifier {
                 allowsMultipleSelection: false,
                 onCompletion: mediaImportComplete(_:)
             )
-    }
-
-    var blurRadius: CGFloat {
-        guard !dropService.isActive else {
-            return 10
-        }
-        if pickedVideoURL != nil, !pickedVideoURL!.isFileURL {
-            return 10
-        }
-        return 0
     }
 
     var dropAllowedView: some View {

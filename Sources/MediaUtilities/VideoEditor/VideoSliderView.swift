@@ -103,21 +103,22 @@ public struct VideoSliderView: View {
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                .background(WidthObtainingBackgroundView(width: $maxWidth))
+                .readViewSize { size in
+                    maxWidth = size.width
+                }
             }
         }
     }
 
+    // was causing Attribute Cycle ...
     var overlayTime: some View {
-        Group {
-            if isShowingSeekerTime {
+        Color.clear
+            .overlay {
                 Text(getTime(from: playerVM.currentTime))
                     .foregroundColor(.orange)
                     .grayBackgroundRound()
-            } else {
-                EmptyView()
+                    .opacity(isShowingSeekerTime ? 1 : 0)
             }
-        }
     }
 
     private func rangeSliderEdited(isEditing: Bool) {
@@ -138,6 +139,9 @@ public struct VideoSliderView: View {
 
     private func getTime(from value: Double) -> String {
         withAnimation {
+            guard isShowingSeekerTime else {
+                return ""
+            }
             if value < 60 {
                 return "\(Int(value.rounded())) s"
             } else if value < 60 * 60 {

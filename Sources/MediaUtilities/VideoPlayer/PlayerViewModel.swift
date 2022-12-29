@@ -16,15 +16,11 @@ final public class PlayerViewModel: ObservableObject {
     @Published public var isEditingCurrentTime = false {
         didSet { isEditingCurrentTime ? pause() : play() }
     }
-    @Published public var isPlaying = false {
-        didSet { isPlaying ? play() : pause() }
-    }
-    @Published public var isMuted = false {
-        didSet { isMuted ? mute() : unmute() }
-    }
+    @Published private(set) var isPlaying = false
+    @Published private(set) var isMuted = false
     @Published public var loopPlayback = true
     @Published public var isShowingControls = true {
-        didSet { addTimeObserver() }
+        didSet { isShowingControls ? addTimeObserver() : () }
     }
     @Published public var currentTime: Double = .zero
     @Published public var duration: Double = .zero
@@ -35,9 +31,8 @@ final public class PlayerViewModel: ObservableObject {
     private var timeObserver: Any?
 
     deinit {
-        if let timeObserver = timeObserver {
-            player.removeTimeObserver(timeObserver)
-        }
+        print("deinit")
+        removeTimeObserver()
     }
 
     public init() {
@@ -143,6 +138,12 @@ final public class PlayerViewModel: ObservableObject {
         }
     }
 
+    private func removeTimeObserver() {
+        if let timeObserver = timeObserver {
+            player.removeTimeObserver(timeObserver)
+        }
+    }
+
     private func updateCurrentTime(_ time: CMTime) {
         guard isEditingCurrentTime == false else {
             return
@@ -150,7 +151,8 @@ final public class PlayerViewModel: ObservableObject {
         withAnimation {
             self.currentTime = time.seconds
         }
-        if endPlayingAt != 0 && currentTime >= endPlayingAt {
+        if endPlayingAt != .zero && currentTime >= endPlayingAt {
+            print("endPlayingAt != 0 && currentTime >= endPlayingAt", currentTime, endPlayingAt)
             endPlayingAtReached()
         }
     }

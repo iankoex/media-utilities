@@ -120,7 +120,7 @@ public struct VideoEditor: View {
                 doneButton
                 controlButton(audioControlImage) {
                     withAnimation {
-                        playerVM.isMuted.toggle()
+                        playerVM.isMuted ? playerVM.unmute() : playerVM.mute()
                     }
                 }
                 controlButton("timeline.selection") {
