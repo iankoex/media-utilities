@@ -11,6 +11,7 @@ enum DropDelegateError: LocalizedError {
     case isGuarded
     case lacksConformingTypeIdentifiers
     case lacksAudioVisualContent
+    case badImage
 
     public var errorDescription: String? {
         let base = "The operation could not be completed. "
@@ -21,6 +22,8 @@ enum DropDelegateError: LocalizedError {
             return base + "The Drop Item Does Not Conform to The Type Identifiers Provided"
         case .lacksAudioVisualContent:
             return base + "The Drop Item is Not an AudioVisual Content, it is not playable"
+        case .badImage:
+            return base + "Failed to get Image from data"
         }
     }
 }

@@ -10,7 +10,7 @@ import SwiftUI
 #if os(iOS)
 import UIKit
 
-typealias UnifiedImage = UIImage
+public typealias UnifiedImage = UIImage
 
 @available(iOS 13.0, macOS 10.15, *)
 extension Image {
@@ -23,7 +23,7 @@ extension Image {
 #if os(macOS)
 import AppKit
 
-typealias UnifiedImage = NSImage
+public typealias UnifiedImage = NSImage
 
 @available(iOS 13.0, macOS 10.15, *)
 extension Image {
