@@ -89,12 +89,10 @@ fileprivate struct MediaPickerRepresentable: UIViewControllerRepresentable {
     var allowedContentTypes: [UTType]
     var onCompletion: (Result<[URL], Error>) -> Void
 
-    
     func makeUIViewController(context: Context) -> PHPickerViewController {
         let controller = PHPickerViewController(configuration: configuration)
         controller.delegate = context.coordinator
 
-        
         return controller
     }
     
@@ -151,7 +149,6 @@ fileprivate struct MediaPickerRepresentable: UIViewControllerRepresentable {
         private func loadFile(for itemProvider: NSItemProvider, ofType contentType: UTType) {
             let progress: Progress = itemProvider.loadFileRepresentation(forTypeIdentifier: contentType.identifier) { url, error in
                 guard let url = url, error == nil else {
-
                     return
                 }
                 self.copyFile(from: url)
