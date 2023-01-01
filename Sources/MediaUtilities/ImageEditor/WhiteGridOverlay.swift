@@ -72,7 +72,6 @@ struct WhiteGridOverlay: View {
             height: oneSideH
         )
         if oneSideH > rect.maxY {
-            print("HIGH")
             let rect1 = CGRect(x: 0, y: 0, width: screenSize.width, height: screenSize.height)
             let oneSideH1 = rect1.maxY - (inset * 2)
             let oneSideW1 = oneSideH1 * 1 / desiredAspectRatio

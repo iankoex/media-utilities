@@ -43,8 +43,8 @@ public struct CropImageView: View {
     let inset: CGFloat = 20
    
     //Zoom Scale and Drag...
-    @State private var currentAmount: CGFloat = 0
-    @State private var finalAmount: CGFloat = 1
+    @State private var currentScaleAmount: CGFloat = 0
+    @State private var finalScaleAmount: CGFloat = 1
     @State private var currentPosition: CGSize = .zero
     @State private var newPosition: CGSize = .zero
     @State private var horizontalOffset: CGFloat = 0.0
@@ -64,7 +64,7 @@ public struct CropImageView: View {
                 Image(unifiedImage: inputImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .scaleEffect(finalAmount + currentAmount)
+                    .scaleEffect(finalScaleAmount + currentScaleAmount)
                     .offset(x: self.currentPosition.width, y: self.currentPosition.height)
             }
 
@@ -83,6 +83,7 @@ public struct CropImageView: View {
         .simultaneousGesture(dragGesture)
         .simultaneousGesture(tapGesture)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
     }
 
     var cropImageViewOverlay: some View {
@@ -111,8 +112,8 @@ public struct CropImageView: View {
             Spacer()
             #if os(macOS)
             HStack {
-                Slider(value: $finalAmount, in: 1...5, label: {
-                    Text("Scale: \(Int(finalAmount * 100/5))%")
+                Slider(value: $finalScaleAmount, in: 1...5, label: {
+                    Text("Scale: \(Int(finalScaleAmount * 100/5))%")
                 }, minimumValueLabel: {
                     Text("min")
                 }, maximumValueLabel: {
@@ -134,12 +135,12 @@ public struct CropImageView: View {
         MagnificationGesture()
             .onChanged { amount in
                 setIsDraggingImage(to: true)
-                self.currentAmount = amount - 1
+                self.currentScaleAmount = amount - 1
             }
             .onEnded { amount in
                 setIsDraggingImage(to: false)
-                self.finalAmount += self.currentAmount
-                self.currentAmount = 0
+                self.finalScaleAmount += self.currentScaleAmount
+                self.currentScaleAmount = 0
                 repositionImage(screenSize: screenSize)
             }
     }
@@ -183,14 +184,16 @@ public struct CropImageView: View {
     private func resetImageOriginAndScale(screenSize: CGSize) {
         withAnimation(.easeInOut) {
             if imageAspectRatio > screenAspectRatio {
+                print("imageAspectRatio > screenAspectRatio true")
                 displayWidth = screenSize.width
                 displayWeight = displayWidth / imageAspectRatio
             } else {
+                print("imageAspectRatio > screenAspectRatio false ")
                 displayWeight = screenSize.height
                 displayWidth = displayWeight * imageAspectRatio
             }
-            currentAmount = 0
-            finalAmount = 1
+            currentScaleAmount = 0
+            finalScaleAmount = 1
             currentPosition = .zero
             newPosition = .zero
         }
@@ -198,70 +201,51 @@ public struct CropImageView: View {
     
     private func repositionImage(screenSize: CGSize) {
         let screenWidth = screenSize.width
-        
-        if imageAspectRatio > screenAspectRatio {
-            displayWidth = screenSize.width * finalAmount
-            displayWeight = displayWidth / imageAspectRatio
-        } else {
-            displayWeight = screenSize.height * finalAmount
-            displayWidth = displayWeight * imageAspectRatio
-        }
+        displayWidth = screenSize.width * finalScaleAmount
+        displayWeight = displayWidth / imageAspectRatio
         horizontalOffset = (displayWidth - screenWidth ) / 2
         verticalOffset = (displayWeight - (screenWidth * desiredAspectRatio)) / 2
-        
-        if finalAmount > 10.0 {
-            withAnimation {
-                finalAmount = 10.0
+
+        if finalScaleAmount > 10.0 {
+            withAnimation(.spring()) {
+                finalScaleAmount = 10.0
             }
         }
-        
-        if displayWidth >= screenSize.width {
-            if newPosition.width > horizontalOffset {
-                print(1)
-                withAnimation(.easeInOut) {
-                    newPosition = CGSize(width: horizontalOffset + inset, height: newPosition.height)
-                    currentPosition = CGSize(width: horizontalOffset + inset, height: currentPosition.height)
-                }
-            }
-            
-            if newPosition.width < (horizontalOffset * -1) {
-                print(2)
-                withAnimation(.easeInOut) {
-                    newPosition = CGSize(width: ( horizontalOffset * -1) - inset, height: newPosition.height)
-                    currentPosition = CGSize(width: ( horizontalOffset * -1 - inset), height: currentPosition.height)
-                }
-            }
-        } else {
+
+        // Leading
+        if newPosition.width > horizontalOffset {
+            print(1)
             withAnimation(.easeInOut) {
-                print(3)
-                newPosition = CGSize(width: 0, height: newPosition.height)
-                currentPosition = CGSize(width: 0, height: newPosition.height)
+                newPosition = CGSize(width: horizontalOffset + inset, height: newPosition.height)
+                currentPosition = newPosition
             }
         }
-        
-//        if displayWeight >= screenSize.width {
-//            if newPosition.height > verticalOffset {
-//                print(4)
-//                withAnimation(.easeInOut) {
-//                    newPosition = CGSize(width: newPosition.width, height: verticalOffset + inset)
-//                    currentPosition = CGSize(width: newPosition.width, height: verticalOffset + inset)
-//                }
-//            }
-//            if newPosition.height < (verticalOffset * -0.1) {
-//                print(5)
-//                withAnimation(.easeInOut) {
-//                    newPosition = CGSize(width: newPosition.width, height: (verticalOffset * -0.1) - inset)
-//                    currentPosition = CGSize(width: newPosition.width, height: (verticalOffset * -0.1) - inset)
-//                }
-//            }
-//        } else {
-//            withAnimation (.easeInOut) {
-//                print(6)
-//                newPosition = CGSize(width: newPosition.width, height: 0)
-//                currentPosition = CGSize(width: newPosition.width, height: 0)
-//            }
-//        }
-        
+        // Trailing
+        if newPosition.width < -horizontalOffset {
+            print(2)
+            withAnimation(.easeInOut) {
+                newPosition = CGSize(width: -horizontalOffset - inset, height: newPosition.height)
+                currentPosition = newPosition
+            }
+        }
+
+        // Top
+        if newPosition.height > verticalOffset {
+            print(4)
+            withAnimation(.easeInOut) {
+                newPosition = CGSize(width: newPosition.width, height: verticalOffset + inset)
+                currentPosition = newPosition
+            }
+        }
+        // Bottom
+        if newPosition.height < -verticalOffset {
+            print(5)
+            withAnimation(.easeInOut) {
+                newPosition = CGSize(width: newPosition.width, height: -verticalOffset - inset)
+                currentPosition = newPosition
+            }
+        }
+
         if displayWidth < screenSize.width && imageAspectRatio > screenAspectRatio {
             print(7)
             resetImageOriginAndScale(screenSize: screenSize)
