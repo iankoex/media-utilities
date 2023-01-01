@@ -110,12 +110,12 @@ public struct VideoEditor: View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 15) {
                 doneButton
-                controlButton(audioControlImage) {
+                EditorControlButton(audioControlImage) {
                     withAnimation {
                         playerVM.isMuted ? playerVM.unmute() : playerVM.mute()
                     }
                 }
-                controlButton("timeline.selection") {
+                EditorControlButton("timeline.selection") {
                     withAnimation {
                         isShowingSlider.toggle()
                     }
@@ -126,7 +126,7 @@ public struct VideoEditor: View {
     }
 
     var doneButton: some View {
-        controlButton("checkmark.circle", action: doneButtonActions)
+        EditorControlButton("checkmark.circle", action: doneButtonActions)
     }
 
     var audioControlImage: String {
@@ -157,25 +157,6 @@ public struct VideoEditor: View {
             .navigationTitle("Exporting Video...")
         }
         .transition(.move(edge: .bottom).combined(with: .opacity))
-    }
-
-    private func controlButton(_ image: String, action: @escaping () -> Void) -> some View {
-        HStack(spacing: 0) {
-            Spacer()
-            Button(action: action) {
-                HStack(spacing: 0) {
-                    Spacer(minLength: 1)
-                    Image(systemName: image)
-                        .font(.title2)
-                        .padding(2)
-                        .grayBackgroundCircle()
-                    Spacer(minLength: 1)
-                }
-                .frame(maxWidth: 50)
-            }
-            .buttonStyle(.borderless)
-            .foregroundColor(.white)
-        }
     }
 
     private func cancelButtonActions() {
