@@ -34,7 +34,7 @@ public struct CropImageView: View {
         self.onCompletion = onCompletion
     }
 
-    @State private var selectedAspectRatio: CGFloat = 0.0
+    @State private var imageAspectRatio: CGFloat = 0.0
     @State private var displayWidth: CGFloat = 0.0
     @State private var displayWeight: CGFloat = 0.0
     @State private var screenSize: CGSize = .zero
@@ -72,13 +72,11 @@ public struct CropImageView: View {
                 .fill(Color.black.opacity(0.8))
 //                .fill(Color.black.opacity(0.3))
                 .mask(
-                    HoleShapeMask(screenSize: screenSize)
+                    HoleShapeMask(screenSize: screenSize, inset: inset, desiredAspectRatio: desiredAspectRatio)
                         .fill(style: FillStyle(eoFill: true))
                  )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            whiteGridOverlay
-                .foregroundColor(.red)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            WhiteGridOverlay(screenSize: screenSize, inset: inset, desiredAspectRatio: desiredAspectRatio)
             cropImageViewOverlay
         }
         .gesture(magGesture)
@@ -178,99 +176,18 @@ public struct CropImageView: View {
         screenAspectRatio = size.width / size.height
         let w = inputImage.size.width
         let h = inputImage.size.height
-        selectedAspectRatio = w / h
+        imageAspectRatio = w / h
         resetImageOriginAndScale(screenSize: screenSize)
-    }
-    
-    func HoleShapeMask(screenSize: CGSize) -> Path {
-        let rect = CGRect(x: 0, y: 0, width: screenSize.width, height: screenSize.height)
-        var shape = Rectangle().path(in: rect)
-        shape.addPath(Rectangle().path(in: insetRect))
-
-        return shape
-    }
-
-    var whiteGridOverlay: some Shape {
-        let insetRect = insetRect
-        let p1 = CGPoint(x: insetRect.minX, y: insetRect.minY)
-        let p2 = CGPoint(x: insetRect.maxX, y: insetRect.minY)
-        let p3 = CGPoint(x: insetRect.maxX, y: insetRect.maxY)
-        let p4 = CGPoint(x: insetRect.minX, y: insetRect.maxY)
-        let p5 = CGPoint(x: insetRect.minX, y: insetRect.maxY * 1/3)
-        let p6 = CGPoint(x: insetRect.minX, y: insetRect.maxY * 2/3)
-        let p7 = CGPoint(x: insetRect.maxX, y: insetRect.maxY * 1/3)
-        let p8 = CGPoint(x: insetRect.maxX, y: insetRect.maxY * 2/3)
-        let p9 = CGPoint(x: insetRect.maxX * 1/3, y: insetRect.minY)
-        let p10 = CGPoint(x: insetRect.maxX * 2/3, y: insetRect.minY)
-        let p11 = CGPoint(x: insetRect.maxX * 1/3, y: insetRect.maxY)
-        let p12 = CGPoint(x: insetRect.maxX * 2/3, y: insetRect.maxY)
-
-        var path = Path()
-        print("Min", insetRect.minX, insetRect.minX)
-
-        path.move(to: p1)
-        path.addLine(to: p1)
-        path.addLine(to: p2)
-        path.addLine(to: p3)
-        path.addLine(to: p4)
-        path.addLine(to: p1)
-        path.move(to: p5)
-        path.addLine(to: p5)
-        path.addLine(to: p7)
-        path.move(to: p6)
-        path.addLine(to: p6)
-        path.addLine(to: p8)
-        path.move(to: p9)
-        path.addLine(to: p9)
-        path.addLine(to: p11)
-        path.move(to: p10)
-        path.addLine(to: p10)
-        path.addLine(to: p12)
-
-        path = path.strokedPath(.init(lineWidth: 2))
-        path.closeSubpath()
-        return path
-    }
-
-    var insetRect: CGRect {
-        let rect = CGRect(x: 0, y: 0, width: screenSize.width, height: screenSize.height)
-        let oneSideW = rect.maxX - (inset * 2)
-        let oneSideH = oneSideW * desiredAspectRatio
-        let halfSideX = oneSideW / 2
-        let halfSideY = oneSideH / 2
-        let insetRect = CGRect(
-            x: (rect.maxX / 2) - halfSideX,
-            y: (rect.maxY / 2) - halfSideY,
-            width: oneSideW,
-            height: oneSideH
-        )
-        if oneSideH > rect.maxY {
-            print("HIGH")
-            let rect1 = CGRect(x: 0, y: 0, width: screenSize.width, height: screenSize.height)
-            let oneSideH1 = rect1.maxY - (inset * 2)
-            let oneSideW1 = oneSideH1 * 1 / desiredAspectRatio
-
-            let halfSideX1 = oneSideW1 / 2
-            let halfSideY1 = oneSideH1 / 2
-            let insetRect1 = CGRect(
-                x: (rect1.maxX / 2) - halfSideX1,
-                y: (rect1.maxY / 2) - halfSideY1,
-                width: oneSideW1,
-                height: oneSideH1
-            )
-            return insetRect1
-        }
-        return insetRect
     }
     
     private func resetImageOriginAndScale(screenSize: CGSize) {
         withAnimation(.easeInOut) {
-            if selectedAspectRatio > screenAspectRatio {
+            if imageAspectRatio > screenAspectRatio {
                 displayWidth = screenSize.width
-                displayWeight = displayWidth / selectedAspectRatio
+                displayWeight = displayWidth / imageAspectRatio
             } else {
                 displayWeight = screenSize.height
-                displayWidth = displayWeight * selectedAspectRatio
+                displayWidth = displayWeight * imageAspectRatio
             }
             currentAmount = 0
             finalAmount = 1
@@ -282,15 +199,15 @@ public struct CropImageView: View {
     private func repositionImage(screenSize: CGSize) {
         let screenWidth = screenSize.width
         
-        if selectedAspectRatio > screenAspectRatio {
+        if imageAspectRatio > screenAspectRatio {
             displayWidth = screenSize.width * finalAmount
-            displayWeight = displayWidth / selectedAspectRatio
+            displayWeight = displayWidth / imageAspectRatio
         } else {
             displayWeight = screenSize.height * finalAmount
-            displayWidth = displayWeight * selectedAspectRatio
+            displayWidth = displayWeight * imageAspectRatio
         }
         horizontalOffset = (displayWidth - screenWidth ) / 2
-        verticalOffset = ( displayWeight - (screenWidth * desiredAspectRatio) ) / 2
+        verticalOffset = (displayWeight - (screenWidth * desiredAspectRatio)) / 2
         
         if finalAmount > 10.0 {
             withAnimation {
@@ -300,49 +217,57 @@ public struct CropImageView: View {
         
         if displayWidth >= screenSize.width {
             if newPosition.width > horizontalOffset {
+                print(1)
                 withAnimation(.easeInOut) {
                     newPosition = CGSize(width: horizontalOffset + inset, height: newPosition.height)
                     currentPosition = CGSize(width: horizontalOffset + inset, height: currentPosition.height)
                 }
             }
             
-            if newPosition.width < ( horizontalOffset * -1) {
-                withAnimation(.easeInOut){
+            if newPosition.width < (horizontalOffset * -1) {
+                print(2)
+                withAnimation(.easeInOut) {
                     newPosition = CGSize(width: ( horizontalOffset * -1) - inset, height: newPosition.height)
                     currentPosition = CGSize(width: ( horizontalOffset * -1 - inset), height: currentPosition.height)
                 }
             }
         } else {
             withAnimation(.easeInOut) {
+                print(3)
                 newPosition = CGSize(width: 0, height: newPosition.height)
                 currentPosition = CGSize(width: 0, height: newPosition.height)
             }
         }
         
-        if displayWeight >= screenSize.width {
-            if newPosition.height > verticalOffset {
-                withAnimation(.easeInOut){
-                    newPosition = CGSize(width: newPosition.width, height: verticalOffset + inset)
-                    currentPosition = CGSize(width: newPosition.width, height: verticalOffset + inset)
-                }
-            }
-            if newPosition.height < ( verticalOffset * -1) {
-                withAnimation(.easeInOut){
-                    newPosition = CGSize(width: newPosition.width, height: ( verticalOffset * -1) - inset)
-                    currentPosition = CGSize(width: newPosition.width, height: ( verticalOffset * -1) - inset)
-                }
-            }
-        } else {
-            withAnimation (.easeInOut){
-                newPosition = CGSize(width: newPosition.width, height: 0)
-                currentPosition = CGSize(width: newPosition.width, height: 0)
-            }
-        }
+//        if displayWeight >= screenSize.width {
+//            if newPosition.height > verticalOffset {
+//                print(4)
+//                withAnimation(.easeInOut) {
+//                    newPosition = CGSize(width: newPosition.width, height: verticalOffset + inset)
+//                    currentPosition = CGSize(width: newPosition.width, height: verticalOffset + inset)
+//                }
+//            }
+//            if newPosition.height < (verticalOffset * -0.1) {
+//                print(5)
+//                withAnimation(.easeInOut) {
+//                    newPosition = CGSize(width: newPosition.width, height: (verticalOffset * -0.1) - inset)
+//                    currentPosition = CGSize(width: newPosition.width, height: (verticalOffset * -0.1) - inset)
+//                }
+//            }
+//        } else {
+//            withAnimation (.easeInOut) {
+//                print(6)
+//                newPosition = CGSize(width: newPosition.width, height: 0)
+//                currentPosition = CGSize(width: newPosition.width, height: 0)
+//            }
+//        }
         
-        if displayWidth < screenSize.width && selectedAspectRatio > screenAspectRatio {
+        if displayWidth < screenSize.width && imageAspectRatio > screenAspectRatio {
+            print(7)
             resetImageOriginAndScale(screenSize: screenSize)
         }
-        if displayWeight < screenSize.height && selectedAspectRatio < screenAspectRatio {
+        if displayWeight < screenSize.height && imageAspectRatio < screenAspectRatio {
+            print(8)
             resetImageOriginAndScale(screenSize: screenSize)
         }
     }
