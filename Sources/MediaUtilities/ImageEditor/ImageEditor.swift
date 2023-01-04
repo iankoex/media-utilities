@@ -36,6 +36,7 @@ public struct ImageEditor: View {
                             self.image = img
                         }
                     )
+                    .transition(.opacity)
                 }
             } else {
                 editorOverlay
@@ -85,7 +86,9 @@ public struct ImageEditor: View {
     }
 
     private func cancelButtonActions() {
-        
+        withAnimation {
+            image = nil
+        }
     }
 
     private func doneButtonActions() {
@@ -93,6 +96,8 @@ public struct ImageEditor: View {
     }
 
     private func showCropImageView() {
-        isShowingImageCropper = true
+        withAnimation {
+            isShowingImageCropper = true
+        }
     }
 }

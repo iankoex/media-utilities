@@ -89,9 +89,7 @@ public struct CropImageView: View {
     var cropImageViewOverlay: some View {
         VStack {
             HStack {
-                EditorControlButton("xmark.circle", action: {
-                    isPresented = false
-                })
+                EditorControlButton("xmark.circle", action: closeCancelAction)
                 Spacer()
                 Text("Move and Scale")
                 Spacer()
@@ -179,6 +177,12 @@ public struct CropImageView: View {
         let h = inputImage.size.height
         imageAspectRatio = w / h
         resetImageOriginAndScale(screenSize: screenSize)
+    }
+
+    private func closeCancelAction() {
+        withAnimation {
+            isPresented = false
+        }
     }
     
     private func resetImageOriginAndScale(screenSize: CGSize) {

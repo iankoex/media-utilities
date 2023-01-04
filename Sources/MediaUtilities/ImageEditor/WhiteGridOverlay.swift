@@ -15,7 +15,7 @@ struct WhiteGridOverlay: View {
     
     var body: some View {
         whiteGridOverlay
-            .foregroundColor(.red)
+            .foregroundColor(.white)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .offset(whiteOverayRectOffset)
     }

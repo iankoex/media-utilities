@@ -101,7 +101,7 @@ struct ImageDropDelegate: DropDelegate {
                             dropCompleted(.failure(DropDelegateError.badImage))
                         }
                         withAnimation {
-                            isActive = false
+//                            isActive = false
                         }
                     }
                     #endif
