@@ -100,7 +100,7 @@ public struct CropImageView: View {
             Spacer()
             bottomButtons
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
         .foregroundColor(.white)
         .padding(.horizontal)
     }

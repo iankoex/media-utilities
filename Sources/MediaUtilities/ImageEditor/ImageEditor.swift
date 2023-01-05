@@ -59,7 +59,7 @@ public struct ImageEditor: View {
             }
             .padding(.top)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
         .foregroundColor(.white)
         .padding(.horizontal)
     }

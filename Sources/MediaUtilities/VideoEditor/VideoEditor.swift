@@ -89,7 +89,7 @@ public struct VideoEditor: View {
                 VideoSliderView()
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
         .foregroundColor(.white)
         .padding(.horizontal)
     }
