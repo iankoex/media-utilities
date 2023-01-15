@@ -7,11 +7,28 @@ This package allows you to:
 # Installation
 Swift Package Manager
 
+# Usage
+You can use the individial files depending on your needs.
+For a holistic unified approach use:
+```
+/// For Images 
+.imagePicker($isShowingImagePicker, aspectRatio: 16 / 9, isGuarded: false) { result in
+
+}
+
+// For Videos
+.videoPicker($isShowingVideoPicker) { result in
+
+}
+```
+What this allows you to do is enable drag and drop to the view,edit the asset then retun the edited asset.
+The `isPresented` directly controls the PhotosPicker in iOS and finder window in macOS.
+
 ## To Do
 - [ ] Adding Stickers on Image/Video
 - [ ] Custom Audio to Video
 - [ ] Drawing on Image/Video
-- [ ] Drag and Drop Delegates
+- [x] Drag and Drop Delegates
 
 # SDKs
 Some features may require higher versions. But generally it supports the following:
