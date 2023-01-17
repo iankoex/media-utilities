@@ -43,7 +43,7 @@ public struct VideoEditor: View {
             }
             videoOverlay
         }
-        .background(Color.black)
+        .background(Color.black.ignoresSafeArea(.all))
         .transition(.move(edge: .bottom))
         .overlay {
             if isExporting {
@@ -87,11 +87,11 @@ public struct VideoEditor: View {
             Spacer()
             if isShowingSlider && !isExportCompletedSuccessfully {
                 VideoSliderView()
+                    .padding(.horizontal)
             }
         }
         .buttonStyle(.borderless)
         .foregroundColor(.white)
-        .padding(.horizontal)
     }
 
     var cancelButton: some View {
@@ -104,25 +104,24 @@ public struct VideoEditor: View {
                     .grayBackgroundCircle()
             }
         }
+        .padding(.leading)
     }
 
     var controlsButtons: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 15) {
-                doneButton
-                EditorControlButton(audioControlImage) {
-                    withAnimation {
-                        playerVM.isMuted ? playerVM.unmute() : playerVM.mute()
-                    }
+        VStack(alignment: .center, spacing: 15) {
+            doneButton
+            EditorControlButton(audioControlImage) {
+                withAnimation {
+                    playerVM.isMuted ? playerVM.unmute() : playerVM.mute()
                 }
-                EditorControlButton("timeline.selection") {
-                    withAnimation {
-                        isShowingSlider.toggle()
-                    }
+            }
+            EditorControlButton("timeline.selection") {
+                withAnimation {
+                    isShowingSlider.toggle()
                 }
             }
         }
-        .frame(maxWidth: 50)
+        .frame(maxWidth: 60)
     }
 
     var doneButton: some View {
@@ -144,12 +143,7 @@ public struct VideoEditor: View {
                 ProgressView(value: videoUtil.progress)
                     .progressViewStyle(.linear)
                     .padding()
-                Button(action: {
-                    videoUtil.exporter?.cancelExport()
-                    withAnimation {
-                        isExporting = false
-                    }
-                }) {
+                Button(action: cancelExport) {
                     Text("Cancel")
                 }
                 .padding()
@@ -191,6 +185,7 @@ public struct VideoEditor: View {
                     isExportCompletedSuccessfully = true
                 }
             } else {
+                playerVM.pause()
                 withAnimation {
                     isExporting = true
                 }
@@ -213,6 +208,7 @@ public struct VideoEditor: View {
                 isExporting = false
                 isExportCompletedSuccessfully = true
             }
+            playerVM.play()
             print("Trim was a success")
 
         case let .error(error):
@@ -220,6 +216,14 @@ public struct VideoEditor: View {
                 isExporting = false
             }
             onCompletion(nil, error)
+        }
+    }
+
+    private func cancelExport() {
+        videoUtil.exporter?.cancelExport()
+        playerVM.play()
+        withAnimation {
+            isExporting = false
         }
     }
 

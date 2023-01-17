@@ -98,7 +98,7 @@ struct ImageDropDelegate: DropDelegate {
                         if let img = UnifiedImage(data: urlData) {
                             dropCompleted(.success(img))
                         } else {
-                            dropCompleted(.failure(DropDelegateError.badImage))
+                            dropCompleted(.failure(MediaUtilitiesError.badImage))
                         }
                         withAnimation {
 //                            isActive = false
@@ -112,7 +112,7 @@ struct ImageDropDelegate: DropDelegate {
                         if let img = NSImage(contentsOf: url) {
                             dropCompleted(.success(img))
                         } else {
-                            dropCompleted(.failure(DropDelegateError.badImage))
+                            dropCompleted(.failure(MediaUtilitiesError.badImage))
                         }
                     }
                     #endif
@@ -120,18 +120,18 @@ struct ImageDropDelegate: DropDelegate {
             } else if item.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
                 item.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
                     guard let data = data else {
-                        dropCompleted(.failure(DropDelegateError.badImage))
+                        dropCompleted(.failure(MediaUtilitiesError.badImage))
                         return
                     }
                     guard let img = UnifiedImage(data: data) else {
-                        dropCompleted(.failure(DropDelegateError.badImage))
+                        dropCompleted(.failure(MediaUtilitiesError.badImage))
                         return
                     }
                     dropCompleted(.success(img))
                 }
             }
         } else {
-            dropCompleted(.failure(DropDelegateError.lacksConformingTypeIdentifiers))
+            dropCompleted(.failure(MediaUtilitiesError.lacksConformingTypeIdentifiers))
             return false
         }
         dropService.isValidated = false

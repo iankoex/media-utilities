@@ -43,15 +43,17 @@ public struct VideoSliderView: View {
     }
 
     var rangeSlider: some View {
-        RangeSlider(
-            value: $playerVM.currentTime,
-            lowerBound: $playerVM.startPlayingAt,
-            upperBound: $playerVM.endPlayingAt,
-            in: 0.0 ... playerVM.duration,
-            onEditingChanged: rangeSliderEdited(isEditing:)
-        )
-        .frame(width: maxWidth)
-        .rangeSliderStyle(rangeSliderStyle)
+        VStack {
+            RangeSlider(
+                value: $playerVM.currentTime,
+                lowerBound: $playerVM.startPlayingAt,
+                upperBound: $playerVM.endPlayingAt,
+                in: 0.0 ... playerVM.duration,
+                onEditingChanged: rangeSliderEdited(isEditing:)
+            )
+            .frame(width: maxWidth)
+            .rangeSliderStyle(rangeSliderStyle)
+        }
     }
 
     var rangeSliderStyle: some RangeSliderStyle {

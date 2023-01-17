@@ -75,14 +75,14 @@ struct VideoDropDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         guard dropService.isGuarded == false else {
-            dropCompleted(.failure(DropDelegateError.isGuarded))
+            dropCompleted(.failure(MediaUtilitiesError.isGuarded))
             return false
         }
 //        guard isAllowed else {
 //            return false
 //        }
         guard let itemProvider = info.itemProviders(for: DropDelegateService.audioVisualIdentifiers).first else {
-            dropCompleted(.failure(DropDelegateError.lacksConformingTypeIdentifiers))
+            dropCompleted(.failure(MediaUtilitiesError.lacksConformingTypeIdentifiers))
             return false
         }
         if itemProvider.hasItemConformingToTypeIdentifier(DropDelegateService.urlIndentifier) {
@@ -105,7 +105,7 @@ struct VideoDropDelegate: DropDelegate {
                 if asset.isPlayable {
                     dropCompleted(.success(url))
                 } else {
-                    dropCompleted(.failure(DropDelegateError.lacksAudioVisualContent))
+                    dropCompleted(.failure(MediaUtilitiesError.lacksAudioVisualContent))
                 }
                 #endif
             }
@@ -143,7 +143,7 @@ struct VideoDropDelegate: DropDelegate {
                 }
                 .store(in: &subscriptions)
         } else {
-            dropCompleted(.failure(DropDelegateError.lacksConformingTypeIdentifiers))
+            dropCompleted(.failure(MediaUtilitiesError.lacksConformingTypeIdentifiers))
             return false
         }
         dropService.isValidated = false

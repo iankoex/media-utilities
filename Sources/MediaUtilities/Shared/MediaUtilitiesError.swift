@@ -1,5 +1,5 @@
 //
-//  DropDelegateError.swift
+//  MediaUtilitiesError.swift
 //  
 //
 //  Created by Ian on 08/12/2022.
@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum DropDelegateError: LocalizedError {
+enum MediaUtilitiesError: LocalizedError {
     case isGuarded
     case lacksConformingTypeIdentifiers
     case lacksAudioVisualContent

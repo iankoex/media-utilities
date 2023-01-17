@@ -14,6 +14,7 @@ public struct ImageEditor: View {
     var onCompletion: (Result<UnifiedImage, Error>) -> Void
     @State private var isExportCompletedSuccessfully: Bool = false
     @State private var isShowingImageCropper: Bool = false
+    @State private var fallBackImage: UnifiedImage? = nil // will be used in the event of reset
 
     public var body: some View {
         ZStack {
@@ -32,9 +33,7 @@ public struct ImageEditor: View {
                         inputImage: image,
                         desiredAspectRatio: aspectRatio,
                         cancelPressed: { },
-                        onCompletion: { img in
-                            self.image = img
-                        }
+                        onCompletion: imageCropperCompleted(_:)
                     )
                     .transition(.opacity)
                 }
@@ -42,7 +41,7 @@ public struct ImageEditor: View {
                 editorOverlay
             }
         }
-        .background(Color.black)
+        .background(Color.black.ignoresSafeArea(.all))
         .transition(.move(edge: .bottom))
     }
 
@@ -58,6 +57,7 @@ public struct ImageEditor: View {
                 }
             }
             .padding(.top)
+            Spacer()
         }
         .buttonStyle(.borderless)
         .foregroundColor(.white)
@@ -72,13 +72,10 @@ public struct ImageEditor: View {
     }
 
     var controlsButtons: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 15) {
-                doneButton
-                EditorControlButton("crop", action: showCropImageView)
-            }
+        VStack(spacing: 15) {
+            doneButton
+            EditorControlButton("crop", action: showCropImageView)
         }
-        .frame(maxWidth: 50)
     }
 
     var doneButton: some View {
@@ -86,18 +83,38 @@ public struct ImageEditor: View {
     }
 
     private func cancelButtonActions() {
-        withAnimation {
-            image = nil
+        if isExportCompletedSuccessfully {
+            image = fallBackImage
+            withAnimation {
+                isExportCompletedSuccessfully = false
+            }
+        } else {
+            withAnimation {
+                image = nil
+            }
         }
     }
 
     private func doneButtonActions() {
-
+        withAnimation {
+            if let img = image {
+                onCompletion(.success(img))
+            }
+            image = nil
+        }
     }
 
     private func showCropImageView() {
         withAnimation {
             isShowingImageCropper = true
+        }
+    }
+
+    private func imageCropperCompleted(_ editedImage: UnifiedImage) {
+        fallBackImage = image
+        image = editedImage
+        withAnimation {
+            isExportCompletedSuccessfully = true
         }
     }
 }

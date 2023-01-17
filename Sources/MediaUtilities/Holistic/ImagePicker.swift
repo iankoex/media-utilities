@@ -35,10 +35,6 @@ public struct ImagePicker: ViewModifier {
     }
     
     @StateObject var dropService: DropDelegateService = .init()
-    var finalImage: UnifiedImage? = nil
-
-
-
     @State private var dropWasSuccessful: Bool = false
     @State private var pickedOrDroppedImage: UnifiedImage? = nil // Dropped or Picked
 
@@ -48,16 +44,10 @@ public struct ImagePicker: ViewModifier {
      */
 
     public func body(content: Content) -> some View {
-        imagePickerContents(content)
-    }
-
-    func imagePickerContents(_ content: Content) -> some View {
         content
             .overlay {
                 if pickedOrDroppedImage != nil {
-                    ImageEditor(image: $pickedOrDroppedImage, aspectRatio: aspectRatio) { result in
-
-                    }
+                    ImageEditor(image: $pickedOrDroppedImage, aspectRatio: aspectRatio, onCompletion: onCompletion)
                 }
             }
             .overlay {
@@ -104,12 +94,12 @@ public struct ImagePicker: ViewModifier {
             withAnimation {
                 pickedOrDroppedImage = img
             }
-        case .failure(let err):
-            print("dropCompleted Error \(err)")
+        case .failure(let error):
+            print("dropCompleted Error \(error)")
             withAnimation {
                 dropWasSuccessful = false
             }
-            print("Failed")
+            onCompletion(.failure(error))
         }
     }
 
@@ -123,22 +113,19 @@ public struct ImagePicker: ViewModifier {
                         pickedOrDroppedImage = image
                     }
                 } else {
+                    onCompletion(.failure(MediaUtilitiesError.badImage))
                     print("Failed: Optional Image")
                 }
             }
         case let .failure(error):
-            print(error)
-            print("Failed: \(error.localizedDescription)")
+            onCompletion(.failure(error))
+            print("mediaImportComplete Failed: \(error.localizedDescription)")
         }
     }
 
     private func getImagefromURL(url: URL) async -> UnifiedImage? {
         var data: Data?
-        do {
-            data = try Data(contentsOf: url, options: .uncached)
-        } catch {
-            print("UnifiedImage Data Sth")
-        }
+        data = try? Data(contentsOf: url, options: .uncached)
         guard let data = data else {
             return nil
         }
