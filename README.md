@@ -1,4 +1,6 @@
 # MediaUtilities
+[![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fiankoex%2Fmedia-utilities%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/iankoex/media-utilities)
+[![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fiankoex%2Fmedia-utilities%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/iankoex/media-utilities)
 
 This package allows you to:
 - Import Images and Videos
