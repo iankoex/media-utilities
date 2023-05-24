@@ -9,7 +9,10 @@ import SwiftUI
 
 @available(iOS 14.0, macOS 11, *)
 extension View {
-    @inlinable public func videoPicker(_ isPresented: Binding<Bool>, onCompletion: @escaping (URL?, Error?) -> Void) -> some View {
+    @inlinable public func videoPicker(
+        _ isPresented: Binding<Bool>,
+        onCompletion: @escaping (Result<URL, Error>) -> Void
+    ) -> some View {
         modifier(VideoPicker(isPresented: isPresented, onCompletion: onCompletion))
     }
 }
@@ -18,9 +21,9 @@ extension View {
 public struct VideoPicker: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
     @Binding var isPresented: Bool // Directly Controlls the MediaPicker
-    var onCompletion: (URL?, Error?) -> Void
+    var onCompletion: (Result<URL, Error>) -> Void
 
-    public init(isPresented: Binding<Bool>, onCompletion: @escaping (URL?, Error?) -> Void) {
+    public init(isPresented: Binding<Bool>, onCompletion: @escaping (Result<URL, Error>) -> Void) {
         self._isPresented = isPresented
         self.onCompletion = onCompletion
     }
@@ -174,17 +177,17 @@ public struct VideoPicker: ViewModifier {
 
     private func mediaImportComplete(_ result: Result<[URL], Error>) {
         switch result {
-        case let .success(urls):
-            print("mediaImportComplete URL: \(urls.first)")
-            DispatchQueue.main.async {
-                pickedVideoURL = urls.first
-                withAnimation {
-                    self.isShowingVideoEditor = true
+            case let .success(urls):
+                print("mediaImportComplete URL: \(urls.first)")
+                DispatchQueue.main.async {
+                    pickedVideoURL = urls.first
+                    withAnimation {
+                        self.isShowingVideoEditor = true
+                    }
                 }
-            }
-        case let .failure(error):
-            onCompletion(nil, error)
-            print("mediaImportComplete", error.localizedDescription)
+            case let .failure(error):
+                onCompletion(.failure(error))
+                print("mediaImportComplete", error.localizedDescription)
         }
     }
 }

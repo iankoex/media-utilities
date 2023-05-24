@@ -11,14 +11,11 @@ import SwiftUI
 public struct VideoEditor: View {
     @Binding var isPresented: Bool
     @Binding var videoURL: URL?
-    var onCompletion: (URL?, Error?) -> Void
-
-    // onCompletions for done and cancel buttons
-    // before done set the statusBar to default
-    //    @Environment(\.scenePhase) var scenePhase
+    var onCompletion: (Result<URL, Error>) -> Void
+    
     @StateObject private var videoUtil: VideoUtil = VideoUtil()
     @StateObject private var playerVM = PlayerViewModel()
-
+    
     @State private var isShowingControlButtonNames: Bool = false
     @State private var isShowingSlider: Bool = false
     
@@ -27,13 +24,17 @@ public struct VideoEditor: View {
         didSet { playerVM.isShowingControls = isExportCompletedSuccessfully }
     }
     @State private var exportedVideoURL: URL? = nil
-
-    public init(isPresented: Binding<Bool>, videoURL: Binding<URL?>, onCompletion: @escaping (URL?, Error?) -> Void) {
+    
+    public init(
+        isPresented: Binding<Bool>,
+        videoURL: Binding<URL?>,
+        onCompletion: @escaping (Result<URL, Error>) -> Void
+    ) {
         self._isPresented = isPresented
         self._videoURL = videoURL
         self.onCompletion = onCompletion
     }
-
+    
     public var body: some View {
         ZStack {
             if videoURL != nil {
@@ -60,7 +61,7 @@ public struct VideoEditor: View {
             initialiseOrResetEditor()
         }
     }
-
+    
     var videoPlayer: some View {
         Group {
             if isExportCompletedSuccessfully {
@@ -71,7 +72,7 @@ public struct VideoEditor: View {
             }
         }
     }
-
+    
     var videoOverlay: some View {
         VStack(alignment: .center) {
             HStack(alignment: .top) {
@@ -93,20 +94,15 @@ public struct VideoEditor: View {
         .buttonStyle(.borderless)
         .foregroundColor(.white)
     }
-
+    
     var cancelButton: some View {
-        Button(action: cancelButtonActions) {
-            if isExportCompletedSuccessfully {
-                Text("Edit")
-            } else {
-                Image(systemName: "xmark.circle")
-                    .font(.title2)
-                    .grayBackgroundCircle()
-            }
-        }
+        EditorControlButton(
+            isExportCompletedSuccessfully ? "pencil.circle" : "xmark.circle",
+            action: cancelButtonActions
+        )
         .padding(.leading)
     }
-
+    
     var controlsButtons: some View {
         VStack(alignment: .center, spacing: 15) {
             doneButton
@@ -123,23 +119,23 @@ public struct VideoEditor: View {
         }
         .frame(maxWidth: 60)
     }
-
+    
     var doneButton: some View {
         EditorControlButton("checkmark.circle", action: doneButtonActions)
     }
-
+    
     var audioControlImage: String {
         playerVM.isMuted ? "speaker" : "speaker.slash"
     }
-
+    
     var exportingOverlay: some View {
         NavigationView {
             VStack {
-                #if os(macOS)
+#if os(macOS)
                 Text("Exporting Video...")
                     .font(.title)
                     .padding()
-                #endif
+#endif
                 ProgressView(value: videoUtil.progress)
                     .progressViewStyle(.linear)
                     .padding()
@@ -152,11 +148,11 @@ public struct VideoEditor: View {
         }
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
-
+    
     private func cancelButtonActions() {
         withAnimation {
             if isExportCompletedSuccessfully {
-               initialiseOrResetEditor()
+                initialiseOrResetEditor()
             } else {
                 // delete from storage
                 playerVM.pause()
@@ -169,10 +165,14 @@ public struct VideoEditor: View {
             }
         }
     }
-
+    
     private func doneButtonActions() {
         if isExportCompletedSuccessfully {
-            onCompletion(exportedVideoURL, nil)
+            guard let exportedVideoURL = exportedVideoURL else {
+                onCompletion(.failure(MediaUtilitiesError.badImage))
+                return
+            }
+            onCompletion(.success(exportedVideoURL))
             withAnimation {
                 isPresented = false
             }
@@ -198,27 +198,27 @@ public struct VideoEditor: View {
             }
         }
     }
-
+    
     private func exportCompleted(_ result: VideoUtil.Result) {
         switch result {
-        case let .success(successURL):
-            exportedVideoURL = successURL
-            playerVM.setCurrentItem(exportedVideoURL!)
-            withAnimation {
-                isExporting = false
-                isExportCompletedSuccessfully = true
-            }
-            playerVM.play()
-            print("Trim was a success")
-
-        case let .error(error):
-            withAnimation {
-                isExporting = false
-            }
-            onCompletion(nil, error)
+            case let .success(successURL):
+                exportedVideoURL = successURL
+                playerVM.setCurrentItem(exportedVideoURL!)
+                withAnimation {
+                    isExporting = false
+                    isExportCompletedSuccessfully = true
+                }
+                playerVM.play()
+                print("Trim was a success")
+                
+            case let .error(error):
+                withAnimation {
+                    isExporting = false
+                }
+                onCompletion(.failure(error))
         }
     }
-
+    
     private func cancelExport() {
         videoUtil.exporter?.cancelExport()
         playerVM.play()
@@ -226,7 +226,7 @@ public struct VideoEditor: View {
             isExporting = false
         }
     }
-
+    
     private func initialiseOrResetEditor() {
         isExportCompletedSuccessfully = false
         isShowingSlider = false
