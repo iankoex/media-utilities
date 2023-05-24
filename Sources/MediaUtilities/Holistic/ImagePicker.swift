@@ -9,7 +9,12 @@ import SwiftUI
 
 @available(iOS 14.0, macOS 11, *)
 extension View {
-    @inlinable public func imagePicker(_ isPresented: Binding<Bool>, aspectRatio: CGFloat, isGuarded: Bool, onCompletion: @escaping (Result<UnifiedImage, Error>) -> Void) -> some View {
+    @inlinable public func imagePicker(
+        _ isPresented: Binding<Bool>,
+        aspectRatio: CGFloat,
+        isGuarded: Bool,
+        onCompletion: @escaping (Result<UnifiedImage, Error>) -> Void
+    ) -> some View {
         modifier(ImagePicker(isPresented: isPresented, aspectRatio: aspectRatio, isGuarded: isGuarded, onCompletion: onCompletion))
     }
 }
