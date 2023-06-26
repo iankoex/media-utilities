@@ -8,8 +8,8 @@
 import SwiftUI
 
 @available(iOS 13.0, macOS 10.15, *)
-struct SpinnerView: View {
-    var body: some View {
+public struct SpinnerView: View {
+    public var body: some View {
         if #available(iOS 14.0, macOS 11, *) {
             ProgressView()
                 .progressViewStyle(.circular)

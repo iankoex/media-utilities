@@ -16,8 +16,8 @@ final public class PlayerViewModel: ObservableObject {
     @Published public var isEditingCurrentTime = false {
         didSet { isEditingCurrentTime ? pause() : play() }
     }
-    @Published private(set) var isPlaying = false
-    @Published private(set) var isMuted = false
+    @Published public private(set) var isPlaying = false
+    @Published public private(set) var isMuted = false
     @Published public var loopPlayback = true
     @Published public var isShowingControls = true {
         didSet { isShowingControls ? addTimeObserver() : () }
@@ -123,6 +123,10 @@ final public class PlayerViewModel: ObservableObject {
             return
         }
         player.isMuted = false
+    }
+    
+    public func toggleMuted() {
+        player.isMuted = !player.isMuted
     }
 
     public func seekTo(_ seconds: Double) {
