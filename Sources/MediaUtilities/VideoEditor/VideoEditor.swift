@@ -88,6 +88,7 @@ public struct VideoEditor: View {
             Spacer()
             if isShowingSlider && !isExportCompletedSuccessfully {
                 VideoSliderView()
+                    .background(Color.gray.opacity(0.001)) // somehow fixes slider issue
                     .padding(.horizontal)
             }
         }
@@ -193,6 +194,7 @@ public struct VideoEditor: View {
                     from: playerVM.startPlayingAt,
                     to: playerVM.endPlayingAt,
                     with: .presetHighestQuality,
+                    removeAudio: playerVM.isMuted,
                     onCompletion: exportCompleted(_:)
                 )
             }
@@ -208,6 +210,7 @@ public struct VideoEditor: View {
                     isExporting = false
                     isExportCompletedSuccessfully = true
                 }
+                playerVM.startPlayingAt = .zero
                 playerVM.play()
                 print("Trim was a success")
                 

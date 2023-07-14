@@ -28,15 +28,33 @@ class VideoUtil: ObservableObject {
         asset?.duration.seconds ?? 0
     }
 
-    func trim(from preferredStartTime: Double, to preferredEndTime: Double, with preset: Quality, onCompletion: @escaping (_ result: Result) -> Void) {
-//        check if the asset is an online video or a local one if one dowload it first else the exporter will fail
+    func trim(
+        from preferredStartTime: Double,
+        to preferredEndTime: Double,
+        with preset: Quality = .presetHighestQuality,
+        removeAudio: Bool = false,
+        onCompletion: @escaping (_ result: Result) -> Void)
+    {
+//        check if the asset is an online video or a local one. If online, download it first else the exporter will fail
         guard let asset = asset else {
             onCompletion(.error(.assetNotSet))
             return
         }
 
         let outputVideoURL = outputURL()
-        exporter = AVAssetExportSession(asset: asset, presetName: preset.value)
+        
+        if removeAudio {
+            let composition = AVMutableComposition()
+            let compositionVideoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+            if let sourceVideoTrack: AVAssetTrack = asset.tracks(withMediaType: .video).first {
+                let x = CMTimeRangeMake(start: .zero, duration: asset.duration)
+                try? compositionVideoTrack?.insertTimeRange(x, of: sourceVideoTrack, at: .zero)
+                compositionVideoTrack?.preferredTransform = sourceVideoTrack.preferredTransform
+            }
+            exporter = AVAssetExportSession(asset: composition, presetName: preset.value)
+        } else {
+            exporter = AVAssetExportSession(asset: asset, presetName: preset.value)
+        }
 
         guard let exporter = exporter else {
             onCompletion(.error(.exporterInitFailed))
@@ -55,6 +73,7 @@ class VideoUtil: ObservableObject {
         exporter.outputURL = outputVideoURL
         exporter.outputFileType = .mp4
         exporter.timeRange = timeRange
+        
         exporter.exportAsynchronously {
             if exporter.status == .completed {
                 DispatchQueue.main.async {

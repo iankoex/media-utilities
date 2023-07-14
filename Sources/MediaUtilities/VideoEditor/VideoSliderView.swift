@@ -28,7 +28,7 @@ public struct VideoSliderView: View {
                 sliderView
             }
         }
-        .transition(.move(edge: .bottom))
+//        .transition(.move(edge: .bottom))
         .padding()
     }
 

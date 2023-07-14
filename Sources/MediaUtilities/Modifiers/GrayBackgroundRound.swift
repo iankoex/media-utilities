@@ -19,7 +19,7 @@ struct GrayBackgroundRound: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(5)
-            .background(Color.gray.opacity(0.3))
+            .background(Color.black.opacity(0.5))
             .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -36,7 +36,7 @@ struct GrayBackgroundCircle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(5)
-            .background(Color.gray.opacity(0.3))
+            .background(Color.black.opacity(0.5))
             .clipShape(Circle())
     }
 }
