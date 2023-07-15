@@ -36,7 +36,7 @@ public struct CropImageView: View {
 
     @State private var imageAspectRatio: CGFloat = 0.0
     @State private var displayWidth: CGFloat = 0.0
-    @State private var displayWeight: CGFloat = 0.0
+    @State private var displayHeight: CGFloat = 0.0
     @State private var screenSize: CGSize = .zero
     @State private var screenAspectRatio: CGFloat = 0.0
     @State private var isDraggingImage: Bool = false
@@ -118,7 +118,7 @@ public struct CropImageView: View {
                     Text("max")
                 }, onEditingChanged: { isEd in
                     if !isEd {
-                        repositionImage(screenSize: screenSize)
+                        repositionImage()
                     }
                 })
                 .frame(width: 250)
@@ -139,7 +139,7 @@ public struct CropImageView: View {
                 setIsDraggingImage(to: false)
                 self.finalScaleAmount += self.currentScaleAmount
                 self.currentScaleAmount = 0
-                repositionImage(screenSize: screenSize)
+                repositionImage()
             }
     }
     
@@ -159,7 +159,7 @@ public struct CropImageView: View {
                     height: value.translation.height + self.newPosition.height
                 )
                 self.newPosition = self.currentPosition
-                repositionImage(screenSize: screenSize)
+                repositionImage()
             }
     }
     
@@ -189,12 +189,12 @@ public struct CropImageView: View {
         withAnimation(.easeInOut) {
             if imageAspectRatio > screenAspectRatio {
                 print("imageAspectRatio > screenAspectRatio true")
-                displayWidth = screenSize.width
-                displayWeight = displayWidth / imageAspectRatio
+                displayWidth = screenSize.width * finalScaleAmount
+                displayHeight = displayWidth / imageAspectRatio
             } else {
                 print("imageAspectRatio > screenAspectRatio false ")
-                displayWeight = screenSize.height
-                displayWidth = displayWeight * imageAspectRatio
+                displayHeight = screenSize.height
+                displayWidth = displayHeight * imageAspectRatio
             }
             currentScaleAmount = 0
             finalScaleAmount = 1
@@ -203,12 +203,15 @@ public struct CropImageView: View {
         }
     }
     
-    private func repositionImage(screenSize: CGSize) {
+    private func repositionImage() {
         let screenWidth = screenSize.width
+        
         displayWidth = screenSize.width * finalScaleAmount
-        displayWeight = displayWidth / imageAspectRatio
-        horizontalOffset = (displayWidth - screenWidth ) / 2
-        verticalOffset = (displayWeight - (screenWidth * desiredAspectRatio)) / 2
+        displayHeight = displayWidth / imageAspectRatio
+        
+        
+        horizontalOffset = ((displayWidth - screenWidth) / 2) + inset
+        verticalOffset = ((displayHeight - (screenWidth * desiredAspectRatio)) / 2) + inset
 
         if finalScaleAmount > 10.0 {
             withAnimation(.spring()) {
@@ -218,34 +221,34 @@ public struct CropImageView: View {
 
         // Leading
         if newPosition.width > horizontalOffset {
-            print(1)
+            print("leading")
             withAnimation(.easeInOut) {
-                newPosition = CGSize(width: horizontalOffset + inset, height: newPosition.height)
+                newPosition = CGSize(width: horizontalOffset, height: newPosition.height)
                 currentPosition = newPosition
             }
         }
         // Trailing
         if newPosition.width < -horizontalOffset {
-            print(2)
+            print("trailing")
             withAnimation(.easeInOut) {
-                newPosition = CGSize(width: -horizontalOffset - inset, height: newPosition.height)
+                newPosition = CGSize(width: -horizontalOffset, height: newPosition.height)
                 currentPosition = newPosition
             }
         }
 
         // Top
         if newPosition.height > verticalOffset {
-            print(4)
+            print("top")
             withAnimation(.easeInOut) {
-                newPosition = CGSize(width: newPosition.width, height: verticalOffset + inset)
+                newPosition = CGSize(width: newPosition.width, height: verticalOffset)
                 currentPosition = newPosition
             }
         }
         // Bottom
         if newPosition.height < -verticalOffset {
-            print(5)
+            print("bottom")
             withAnimation(.easeInOut) {
-                newPosition = CGSize(width: newPosition.width, height: -verticalOffset - inset)
+                newPosition = CGSize(width: newPosition.width, height: -verticalOffset)
                 currentPosition = newPosition
             }
         }
@@ -254,7 +257,7 @@ public struct CropImageView: View {
             print(7)
             resetImageOriginAndScale(screenSize: screenSize)
         }
-        if displayWeight < screenSize.height && imageAspectRatio < screenAspectRatio {
+        if displayHeight < screenSize.height && imageAspectRatio < screenAspectRatio {
             print(8)
             resetImageOriginAndScale(screenSize: screenSize)
         }
@@ -269,7 +272,7 @@ public struct CropImageView: View {
     private func cropImage() {
         let scale = (inputImage.size.width) / displayWidth
         let xPos = ( ( ( displayWidth - screenSize.width ) / 2 ) + inset + ( currentPosition.width * -1 ) ) * scale
-        let yPos = ( ( ( displayWeight - (screenSize.width * desiredAspectRatio) ) / 2  ) + inset + ( currentPosition.height * -1 ) ) * scale
+        let yPos = ( ( ( displayHeight - (screenSize.width * desiredAspectRatio) ) / 2  ) + inset + ( currentPosition.height * -1 ) ) * scale
         let radius = ( screenSize.width - inset * 2 ) * scale
         let radius1 = radius * desiredAspectRatio
         guard let img = imageFromCrop(image: inputImage, croppedTo: CGRect(x: xPos, y: yPos, width: radius, height: radius1)) else {
@@ -307,16 +310,44 @@ public struct CropImageView: View {
 }
 
 @available(iOS 14.0, macOS 11, *)
-struct Cropr_Previews: PreviewProvider {
-    static var previews: some View {
+public struct Croppr: View {
+    
+    public init(){}
+    
+    public var body: some View {
+//        Image("mac")
+//            .resizable()
+//            .frame(width: 400, height: 400)
         CropImageView(
             .constant(true),
-            inputImage: UnifiedImage(named: "mac")!,
-            desiredAspectRatio: 16/9,
+            inputImage: UnifiedImage(named: "sunflower")!,
+            desiredAspectRatio: 1,
             cancelPressed: {},
             onCompletion: { img in
-
+                
             }
         )
     }
 }
+
+//@available(iOS 14.0, macOS 11, *)
+//struct Cropr_Previews: PreviewProvider {
+//    static var previews: some View {
+//        ImageEditor(
+//            image: .constant(UnifiedImage(named: "mac")!),
+//            aspectRatio: 1,
+//            onCompletion: { img in
+//
+//            }
+//        )
+//        CropImageView(
+//            .constant(true),
+//            inputImage: UnifiedImage(named: "mac")!,
+//            desiredAspectRatio: 16/9,
+//            cancelPressed: {},
+//            onCompletion: { img in
+//
+//            }
+//        )
+//    }
+//}
