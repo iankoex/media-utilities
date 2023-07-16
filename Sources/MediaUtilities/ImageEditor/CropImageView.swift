@@ -179,7 +179,7 @@ public struct CropImageView: View {
     var tapGesture: some Gesture {
         TapGesture(count: 2)
             .onEnded {
-                resetImageOriginAndScale(screenSize: screenSize)
+                resetImageOriginAndScale()
             }
     }
     
@@ -189,7 +189,7 @@ public struct CropImageView: View {
         let w = inputImage.size.width
         let h = inputImage.size.height
         imageAspectRatio = w / h
-        resetImageOriginAndScale(screenSize: screenSize)
+        resetImageOriginAndScale()
         print("Screen size", screenSize)
         scaleImagetoFit()
     }
@@ -200,22 +200,13 @@ public struct CropImageView: View {
         }
     }
     
-    private func resetImageOriginAndScale(screenSize: CGSize) {
-//        withAnimation(.easeInOut) {
-//            if imageAspectRatio > screenAspectRatio {
-//                print("imageAspectRatio > screenAspectRatio true")
-//                displayWidth = screenSize.width * finalScaleAmount
-//                displayHeight = displayWidth / imageAspectRatio
-//            } else {
-//                print("imageAspectRatio > screenAspectRatio false ")
-//                displayHeight = screenSize.height
-//                displayWidth = displayHeight * imageAspectRatio
-//            }
-//            currentScaleAmount = 0
-//            finalScaleAmount = 1
-//            currentPosition = .zero
-//            newPosition = .zero
-//        }
+    private func resetImageOriginAndScale() {
+        withAnimation(.easeInOut) {
+            currentScaleAmount = 0
+            finalScaleAmount = minScaleAmount
+            currentPosition = .zero
+            newPosition = .zero
+        }
     }
     
     private var holeWidth: CGFloat {
@@ -227,19 +218,20 @@ public struct CropImageView: View {
     }
     
     private func scaleImagetoFit() {
+        guard imageViewSize != .zero else {
+            return
+        }
         let widthScaleFactor = holeWidth / imageViewSize.width
         let heightScaleFactor = holeHeight / imageViewSize.height
         
         if imageViewSize.height < holeHeight {
-            print("H Problem")
             finalScaleAmount = heightScaleFactor
             minScaleAmount = heightScaleFactor
-        }
-        
-        if imageViewSize.width < holeWidth {
-            print("W Problem")
+        } else if imageViewSize.width < holeWidth {
             finalScaleAmount = widthScaleFactor
             minScaleAmount = widthScaleFactor
+        } else {
+            minScaleAmount = max(heightScaleFactor, widthScaleFactor)
         }
     }
     
@@ -290,16 +282,6 @@ public struct CropImageView: View {
                 newPosition = currentPosition
             }
         }
-        
-        
-//        if displayWidth < screenSize.width && imageAspectRatio > screenAspectRatio {
-//            print(7)
-//            resetImageOriginAndScale(screenSize: screenSize)
-//        }
-//        if displayHeight < screenSize.height && imageAspectRatio < screenAspectRatio {
-//            print(8)
-//            resetImageOriginAndScale(screenSize: screenSize)
-//        }
     }
 
     private func setIsDraggingImage(to bool: Bool) {
@@ -359,8 +341,8 @@ public struct Croppr: View {
 //            .frame(width: 400, height: 400)
         CropImageView(
             .constant(true),
-            inputImage: UnifiedImage(named: "pic1")!,
-            desiredAspectRatio: 1,
+            inputImage: UnifiedImage(named: "sunflower")!,
+            desiredAspectRatio: 16/9,
             cancelPressed: {},
             onCompletion: { img in
                 
