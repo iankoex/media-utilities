@@ -35,8 +35,8 @@ public struct CropImageView: View {
     }
 
     @State private var imageAspectRatio: CGFloat = 0.0
-    @State private var displayWidth: CGFloat = 0.0
-    @State private var displayHeight: CGFloat = 0.0
+//    @State private var displayWidth: CGFloat = 0.0
+//    @State private var displayHeight: CGFloat = 0.0
     @State private var screenSize: CGSize = .zero
     @State private var screenAspectRatio: CGFloat = 0.0
     @State private var isDraggingImage: Bool = false
@@ -181,16 +181,11 @@ public struct CropImageView: View {
     
     private func setImageViewSize(_ size: CGSize) {
         imageViewSize = size
-        print("Image View", size)
         scaleImagetoFit()
     }
     
     private func setScreenParticulars(_ size: CGSize) {
         screenSize = size
-        screenAspectRatio = size.width / size.height
-        let w = inputImage.size.width
-        let h = inputImage.size.height
-        imageAspectRatio = w / h
         resetImageOriginAndScale()
         print("Screen size", screenSize)
         scaleImagetoFit()
@@ -217,6 +212,14 @@ public struct CropImageView: View {
     
     private var holeHeight: CGFloat {
         holeWidth * desiredAspectRatio
+    }
+    
+    private var heightOffsetLimit: CGFloat {
+        (imageViewSize.height / 2 * finalScaleAmount) - (holeHeight / 2)
+    }
+    
+    private var widthOffsetLimit: CGFloat {
+        (imageViewSize.width / 2 * finalScaleAmount) - (holeWidth / 2)
     }
     
     private func scaleImagetoFit() {
@@ -249,9 +252,6 @@ public struct CropImageView: View {
                 finalScaleAmount = minScaleAmount
             }
         }
-        
-        let heightOffsetLimit = (imageViewSize.height / 2 * finalScaleAmount) - (holeHeight / 2)
-        let widthOffsetLimit = (imageViewSize.width / 2 * finalScaleAmount) - (holeWidth / 2)
         
         // Leading
         if currentPosition.width > widthOffsetLimit {
@@ -293,43 +293,54 @@ public struct CropImageView: View {
     }
 
     private func cropImage() {
-        let scale = (inputImage.size.width) / displayWidth
-        let xPos = ( ( ( displayWidth - screenSize.width ) / 2 ) + inset + ( currentPosition.width * -1 ) ) * scale
-        let yPos = ( ( ( displayHeight - (screenSize.width * desiredAspectRatio) ) / 2  ) + inset + ( currentPosition.height * -1 ) ) * scale
-        let radius = ( screenSize.width - inset * 2 ) * scale
-        let radius1 = radius * desiredAspectRatio
-        guard let img = imageFromCrop(image: inputImage, croppedTo: CGRect(x: xPos, y: yPos, width: radius, height: radius1)) else {
+        let xScale = inputImage.size.width / (imageViewSize.width * finalScaleAmount)
+        let yScale = inputImage.size.height / (imageViewSize.height * finalScaleAmount)
+        
+        let xPos = (widthOffsetLimit - currentPosition.width) * xScale
+        let yPos = (heightOffsetLimit - currentPosition.height) * yScale
+        let width = holeWidth * xScale
+        let heigth = holeHeight * yScale
+        
+        let rect = CGRect(
+            x: xPos,
+            y: yPos,
+            width: width,
+            height: heigth
+        )
+        
+        guard let img = cropImage(to: rect) else {
             // Err callback
             isPresented = false
+            print("crop image error")
             return
         }
         onCompletion(img)
         isPresented = false
     }
-    
-    #if os(iOS)
-    private func imageFromCrop(image: UIImage, croppedTo rect: CGRect) -> UIImage? {
-        UIGraphicsBeginImageContext(rect.size)
-        let context = UIGraphicsGetCurrentContext()
-        let drawRect = CGRect(x: -rect.origin.x, y: -rect.origin.y, width: image.size.width, height: image.size.height)
-        context?.clip(to: CGRect(x: 0, y: 0, width: rect.size.width, height: rect.size.height))
-        image.draw(in: drawRect)
-        let subImage = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        return subImage
-     }
-    #else
 
-    private func imageFromCrop(image: NSImage, croppedTo rect: CGRect) -> NSImage? {
-        let croppedImrect: CGRect = rect
-        let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
-        var croppedImage = NSImage(named: "iconWhite")
-        if let cropped = cgImage!.cropping(to: croppedImrect) {
-            croppedImage = NSImage(cgImage: cropped, size: rect.size)
+    private func cropImage(to rect: CGRect) -> UnifiedImage? {
+        guard let cgImage = inputImage.cgImage else {
+            return nil
         }
-        return croppedImage
+        guard let croppedCGImage = cgImage.cropping(to: rect) else {
+            return nil
+        }
+        return UnifiedImage(cgImage: croppedCGImage, size: rect.size)
     }
-    #endif
+}
+
+extension UnifiedImage {
+#if canImport(UIKit)
+    convenience init(cgImage: CGImage, size: CGSize) {
+        self.init(cgImage: cgImage)
+    }
+#endif
+    
+#if os(macOS)
+    var cgImage: CGImage? {
+        self.cgImage(forProposedRect: nil, context: nil, hints: nil)
+    }
+#endif
 }
 
 @available(iOS 14.0, macOS 11, *)
