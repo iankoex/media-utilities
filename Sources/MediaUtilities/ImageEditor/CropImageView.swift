@@ -34,12 +34,8 @@ public struct CropImageView: View {
         self.onCompletion = onCompletion
     }
 
-    @State private var imageAspectRatio: CGFloat = 0.0
-//    @State private var displayWidth: CGFloat = 0.0
-//    @State private var displayHeight: CGFloat = 0.0
     @State private var screenSize: CGSize = .zero
-    @State private var screenAspectRatio: CGFloat = 0.0
-    @State private var isDraggingImage: Bool = false
+    @State private var imageViewSize: CGSize = .zero
     let inset: CGFloat = 20
    
     //Zoom Scale and Drag...
@@ -48,9 +44,7 @@ public struct CropImageView: View {
     @State private var minScaleAmount: CGFloat = 1
     @State private var currentPosition: CGSize = .zero
     @State private var newPosition: CGSize = .zero
-    @State private var imageViewSize: CGSize = .zero
-    @State private var horizontalOffset: CGFloat = 0.0
-    @State private var verticalOffset: CGFloat = 0.0
+    @State private var isDraggingImage: Bool = false
     
     public var body: some View {
         contents
