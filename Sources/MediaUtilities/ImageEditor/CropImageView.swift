@@ -47,6 +47,10 @@ public struct CropImageView: View {
     @State private var finalScaleAmount: CGFloat = 1
     @State private var currentPosition: CGSize = .zero
     @State private var newPosition: CGSize = .zero
+    @State private var currentPoint: CGPoint = .zero
+    @State private var initialPoint: CGPoint = .zero
+    @State private var newPoint: CGPoint = .zero
+    @State private var imageViewSize: CGSize = .zero
     @State private var horizontalOffset: CGFloat = 0.0
     @State private var verticalOffset: CGFloat = 0.0
     
@@ -60,17 +64,28 @@ public struct CropImageView: View {
             Color.black
                 .edgesIgnoringSafeArea(.all)
             
-            VStack {
-                Image(unifiedImage: inputImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .scaleEffect(finalScaleAmount + currentScaleAmount)
-                    .offset(x: self.currentPosition.width, y: self.currentPosition.height)
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    Image(unifiedImage: inputImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .readViewSize { size in
+                            imageViewSize = size
+                            print("Image View", size)
+                        }
+                        .scaleEffect(finalScaleAmount + currentScaleAmount)
+                        .offset(x: self.currentPosition.width, y: self.currentPosition.height)
+//                        .position(currentPoint)
+                        
+                    Spacer(minLength: 0)
+                }
+                Spacer(minLength: 0)
             }
-
+            
             Rectangle()
-                .fill(Color.black.opacity(0.8))
-//                .fill(Color.black.opacity(0.3))
+                .fill(Color.black.opacity(isDraggingImage ? 0.3 : 0.8))
                 .mask(
                     HoleShapeMask(screenSize: screenSize, inset: inset, desiredAspectRatio: desiredAspectRatio)
                         .fill(style: FillStyle(eoFill: true))
@@ -151,6 +166,8 @@ public struct CropImageView: View {
                     width: value.translation.width + self.newPosition.width,
                     height: value.translation.height + self.newPosition.height
                 )
+                
+                currentPoint.y = newPoint.y + value.translation.height
             }
             .onEnded { value in
                 setIsDraggingImage(to: false)
@@ -159,6 +176,9 @@ public struct CropImageView: View {
                     height: value.translation.height + self.newPosition.height
                 )
                 self.newPosition = self.currentPosition
+                
+                currentPoint.y = newPoint.y + value.translation.height
+                newPoint = currentPoint
                 repositionImage()
             }
     }
@@ -177,6 +197,12 @@ public struct CropImageView: View {
         let h = inputImage.size.height
         imageAspectRatio = w / h
         resetImageOriginAndScale(screenSize: screenSize)
+        currentPoint.x = size.width / 2
+        currentPoint.y = size.height / 2
+        newPoint = currentPoint
+        initialPoint = currentPoint
+        print("Screen size", screenSize)
+//        print("Initial: ", currentPoint)
     }
 
     private func closeCancelAction() {
@@ -186,81 +212,78 @@ public struct CropImageView: View {
     }
     
     private func resetImageOriginAndScale(screenSize: CGSize) {
-        withAnimation(.easeInOut) {
-            if imageAspectRatio > screenAspectRatio {
-                print("imageAspectRatio > screenAspectRatio true")
-                displayWidth = screenSize.width * finalScaleAmount
-                displayHeight = displayWidth / imageAspectRatio
-            } else {
-                print("imageAspectRatio > screenAspectRatio false ")
-                displayHeight = screenSize.height
-                displayWidth = displayHeight * imageAspectRatio
-            }
-            currentScaleAmount = 0
-            finalScaleAmount = 1
-            currentPosition = .zero
-            newPosition = .zero
-        }
+//        withAnimation(.easeInOut) {
+//            if imageAspectRatio > screenAspectRatio {
+//                print("imageAspectRatio > screenAspectRatio true")
+//                displayWidth = screenSize.width * finalScaleAmount
+//                displayHeight = displayWidth / imageAspectRatio
+//            } else {
+//                print("imageAspectRatio > screenAspectRatio false ")
+//                displayHeight = screenSize.height
+//                displayWidth = displayHeight * imageAspectRatio
+//            }
+//            currentScaleAmount = 0
+//            finalScaleAmount = 1
+//            currentPosition = .zero
+//            newPosition = .zero
+//        }
     }
     
     private func repositionImage() {
-        let screenWidth = screenSize.width
+        print("current: ", currentPosition)
         
-        displayWidth = screenSize.width * finalScaleAmount
-        displayHeight = displayWidth / imageAspectRatio
-        
-        
-        horizontalOffset = ((displayWidth - screenWidth) / 2) + inset
-        verticalOffset = ((displayHeight - (screenWidth * desiredAspectRatio)) / 2) + inset
-
         if finalScaleAmount > 10.0 {
             withAnimation(.spring()) {
                 finalScaleAmount = 10.0
             }
         }
-
+        
+        let holeWidth = (screenSize.width - (inset * 2))
+        let holeHeight = holeWidth * desiredAspectRatio
+        let heightOffsetLimit = (imageViewSize.height / 2 * finalScaleAmount) - (holeHeight / 2)
+        let widthOffsetLimit = (imageViewSize.width / 2 * finalScaleAmount) - (holeWidth / 2)
+        
         // Leading
-        if newPosition.width > horizontalOffset {
-            print("leading")
+        if currentPosition.width > widthOffsetLimit {
             withAnimation(.easeInOut) {
-                newPosition = CGSize(width: horizontalOffset, height: newPosition.height)
-                currentPosition = newPosition
+                currentPosition.width = widthOffsetLimit
+                newPosition = currentPosition
             }
         }
+        
         // Trailing
-        if newPosition.width < -horizontalOffset {
-            print("trailing")
+        if currentPosition.width < -widthOffsetLimit {
             withAnimation(.easeInOut) {
-                newPosition = CGSize(width: -horizontalOffset, height: newPosition.height)
-                currentPosition = newPosition
+                currentPosition.width = -widthOffsetLimit
+                newPosition = currentPosition
             }
         }
-
+        
         // Top
-        if newPosition.height > verticalOffset {
-            print("top")
+        if currentPosition.height > heightOffsetLimit {
             withAnimation(.easeInOut) {
-                newPosition = CGSize(width: newPosition.width, height: verticalOffset)
-                currentPosition = newPosition
+                currentPosition.height = heightOffsetLimit
+                newPosition = currentPosition
             }
         }
+        
         // Bottom
-        if newPosition.height < -verticalOffset {
-            print("bottom")
+        if currentPosition.height < -heightOffsetLimit {
             withAnimation(.easeInOut) {
-                newPosition = CGSize(width: newPosition.width, height: -verticalOffset)
-                currentPosition = newPosition
+                currentPosition.height = -heightOffsetLimit
+                newPosition = currentPosition
             }
         }
-
-        if displayWidth < screenSize.width && imageAspectRatio > screenAspectRatio {
-            print(7)
-            resetImageOriginAndScale(screenSize: screenSize)
-        }
-        if displayHeight < screenSize.height && imageAspectRatio < screenAspectRatio {
-            print(8)
-            resetImageOriginAndScale(screenSize: screenSize)
-        }
+        
+        
+//        if displayWidth < screenSize.width && imageAspectRatio > screenAspectRatio {
+//            print(7)
+//            resetImageOriginAndScale(screenSize: screenSize)
+//        }
+//        if displayHeight < screenSize.height && imageAspectRatio < screenAspectRatio {
+//            print(8)
+//            resetImageOriginAndScale(screenSize: screenSize)
+//        }
     }
 
     private func setIsDraggingImage(to bool: Bool) {
@@ -320,8 +343,8 @@ public struct Croppr: View {
 //            .frame(width: 400, height: 400)
         CropImageView(
             .constant(true),
-            inputImage: UnifiedImage(named: "sunflower")!,
-            desiredAspectRatio: 1,
+            inputImage: UnifiedImage(named: "pic1")!,
+            desiredAspectRatio: 16/9,
             cancelPressed: {},
             onCompletion: { img in
                 

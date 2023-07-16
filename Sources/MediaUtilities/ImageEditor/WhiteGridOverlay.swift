@@ -62,8 +62,7 @@ struct WhiteGridOverlay: View {
     }
 
     var whiteOverayRect: CGRect {
-        let rect = CGRect(x: 0, y: 0, width: screenSize.width, height: screenSize.height)
-        let oneSideW = rect.maxX - (inset * 2)
+        let oneSideW = screenSize.width - (inset * 2)
         let oneSideH = oneSideW * desiredAspectRatio
         let insetRect = CGRect(
             x: 0,
@@ -71,7 +70,7 @@ struct WhiteGridOverlay: View {
             width: oneSideW,
             height: oneSideH
         )
-        if oneSideH > rect.maxY {
+        if oneSideH > screenSize.height {
             let rect1 = CGRect(x: 0, y: 0, width: screenSize.width, height: screenSize.height)
             let oneSideH1 = rect1.maxY - (inset * 2)
             let oneSideW1 = oneSideH1 * 1 / desiredAspectRatio
@@ -88,16 +87,15 @@ struct WhiteGridOverlay: View {
     }
 
     var whiteOverayRectOffset: CGSize {
-        let rect = CGRect(x: 0, y: 0, width: screenSize.width, height: screenSize.height)
-        let oneSideW = rect.maxX - (inset * 2)
+        let oneSideW = screenSize.width - (inset * 2)
         let oneSideH = oneSideW * desiredAspectRatio
         let halfSideX = oneSideW / 2
         let halfSideY = oneSideH / 2
         let insetRectOffset = CGSize(
-            width: (rect.maxX / 2) - halfSideX,
-            height: (rect.maxY / 2) - halfSideY
+            width: (screenSize.width / 2) - halfSideX,
+            height: (screenSize.height / 2) - halfSideY
         )
-        if oneSideH > rect.maxY {
+        if oneSideH > screenSize.height {
             let rect1 = CGRect(x: 0, y: 0, width: screenSize.width, height: screenSize.height)
             let oneSideH1 = rect1.maxY - (inset * 2)
             let oneSideW1 = oneSideH1 * 1 / desiredAspectRatio
