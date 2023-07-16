@@ -69,11 +69,7 @@ public struct CropImageView: View {
                     Image(unifiedImage: inputImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .readViewSize { size in
-                            imageViewSize = size
-                            print("Image View", size)
-                            scaleImagetoFit()
-                        }
+                        .readViewSize(onChange: setImageViewSize(_:))
                         .scaleEffect(finalScaleAmount + currentScaleAmount)
                         .offset(x: self.currentPosition.width, y: self.currentPosition.height)
                         
@@ -181,6 +177,12 @@ public struct CropImageView: View {
             .onEnded {
                 resetImageOriginAndScale()
             }
+    }
+    
+    private func setImageViewSize(_ size: CGSize) {
+        imageViewSize = size
+        print("Image View", size)
+        scaleImagetoFit()
     }
     
     private func setScreenParticulars(_ size: CGSize) {
