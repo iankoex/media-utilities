@@ -77,7 +77,6 @@ public struct CropImageView: View {
                         }
                         .scaleEffect(finalScaleAmount + currentScaleAmount)
                         .offset(x: self.currentPosition.width, y: self.currentPosition.height)
-//                        .position(currentPoint)
                         
                     Spacer(minLength: 0)
                 }
@@ -166,8 +165,6 @@ public struct CropImageView: View {
                     width: value.translation.width + self.newPosition.width,
                     height: value.translation.height + self.newPosition.height
                 )
-                
-                currentPoint.y = newPoint.y + value.translation.height
             }
             .onEnded { value in
                 setIsDraggingImage(to: false)
@@ -176,9 +173,6 @@ public struct CropImageView: View {
                     height: value.translation.height + self.newPosition.height
                 )
                 self.newPosition = self.currentPosition
-                
-                currentPoint.y = newPoint.y + value.translation.height
-                newPoint = currentPoint
                 repositionImage()
             }
     }
@@ -197,12 +191,7 @@ public struct CropImageView: View {
         let h = inputImage.size.height
         imageAspectRatio = w / h
         resetImageOriginAndScale(screenSize: screenSize)
-        currentPoint.x = size.width / 2
-        currentPoint.y = size.height / 2
-        newPoint = currentPoint
-        initialPoint = currentPoint
         print("Screen size", screenSize)
-//        print("Initial: ", currentPoint)
     }
 
     private func closeCancelAction() {
@@ -230,8 +219,6 @@ public struct CropImageView: View {
     }
     
     private func repositionImage() {
-        print("current: ", currentPosition)
-        
         if finalScaleAmount > 10.0 {
             withAnimation(.spring()) {
                 finalScaleAmount = 10.0
