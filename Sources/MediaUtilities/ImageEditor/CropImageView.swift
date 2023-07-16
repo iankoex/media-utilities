@@ -45,11 +45,9 @@ public struct CropImageView: View {
     //Zoom Scale and Drag...
     @State private var currentScaleAmount: CGFloat = 0
     @State private var finalScaleAmount: CGFloat = 1
+    @State private var minScaleAmount: CGFloat = 1
     @State private var currentPosition: CGSize = .zero
     @State private var newPosition: CGSize = .zero
-    @State private var currentPoint: CGPoint = .zero
-    @State private var initialPoint: CGPoint = .zero
-    @State private var newPoint: CGPoint = .zero
     @State private var imageViewSize: CGSize = .zero
     @State private var horizontalOffset: CGFloat = 0.0
     @State private var verticalOffset: CGFloat = 0.0
@@ -74,6 +72,7 @@ public struct CropImageView: View {
                         .readViewSize { size in
                             imageViewSize = size
                             print("Image View", size)
+                            scaleImagetoFit()
                         }
                         .scaleEffect(finalScaleAmount + currentScaleAmount)
                         .offset(x: self.currentPosition.width, y: self.currentPosition.height)
@@ -192,6 +191,7 @@ public struct CropImageView: View {
         imageAspectRatio = w / h
         resetImageOriginAndScale(screenSize: screenSize)
         print("Screen size", screenSize)
+        scaleImagetoFit()
     }
 
     private func closeCancelAction() {
@@ -218,10 +218,35 @@ public struct CropImageView: View {
 //        }
     }
     
+    private func scaleImagetoFit() {
+        let holeWidth = (screenSize.width - (inset * 2))
+        let holeHeight = holeWidth * desiredAspectRatio
+        let widthScaleFactor = holeWidth / imageViewSize.width
+        let heightScaleFactor = holeHeight / imageViewSize.height
+        
+        if imageViewSize.height < holeHeight {
+            print("H Problem")
+            finalScaleAmount = heightScaleFactor
+            minScaleAmount = heightScaleFactor
+        }
+        
+        if imageViewSize.width < holeWidth {
+            print("W Problem")
+            finalScaleAmount = widthScaleFactor
+            minScaleAmount = widthScaleFactor
+        }
+    }
+    
     private func repositionImage() {
         if finalScaleAmount > 10.0 {
             withAnimation(.spring()) {
                 finalScaleAmount = 10.0
+            }
+        }
+        
+        if finalScaleAmount < minScaleAmount {
+            withAnimation(.spring()) {
+                finalScaleAmount = minScaleAmount
             }
         }
         
@@ -331,7 +356,7 @@ public struct Croppr: View {
         CropImageView(
             .constant(true),
             inputImage: UnifiedImage(named: "pic1")!,
-            desiredAspectRatio: 16/9,
+            desiredAspectRatio: 1,
             cancelPressed: {},
             onCompletion: { img in
                 
