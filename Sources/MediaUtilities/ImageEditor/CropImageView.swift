@@ -181,7 +181,6 @@ public struct CropImageView: View {
     private func setScreenParticulars(_ size: CGSize) {
         screenSize = size
         resetImageOriginAndScale()
-        print("Screen size", screenSize)
         scaleImagetoFit()
     }
 
@@ -305,7 +304,6 @@ public struct CropImageView: View {
         guard let img = cropImage(to: rect) else {
             // Err callback
             isPresented = false
-            print("crop image error")
             return
         }
         onCompletion(img)
@@ -338,14 +336,11 @@ extension UnifiedImage {
 }
 
 @available(iOS 14.0, macOS 11, *)
-public struct Croppr: View {
+public struct Cropr_Previews: View {
     
     public init(){}
     
     public var body: some View {
-//        Image("mac")
-//            .resizable()
-//            .frame(width: 400, height: 400)
         CropImageView(
             .constant(true),
             inputImage: UnifiedImage(named: "sunflower")!,
