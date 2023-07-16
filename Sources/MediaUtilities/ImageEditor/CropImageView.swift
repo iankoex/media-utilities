@@ -218,9 +218,15 @@ public struct CropImageView: View {
 //        }
     }
     
+    private var holeWidth: CGFloat {
+        screenSize.width - (inset * 2)
+    }
+    
+    private var holeHeight: CGFloat {
+        holeWidth * desiredAspectRatio
+    }
+    
     private func scaleImagetoFit() {
-        let holeWidth = (screenSize.width - (inset * 2))
-        let holeHeight = holeWidth * desiredAspectRatio
         let widthScaleFactor = holeWidth / imageViewSize.width
         let heightScaleFactor = holeHeight / imageViewSize.height
         
@@ -250,8 +256,6 @@ public struct CropImageView: View {
             }
         }
         
-        let holeWidth = (screenSize.width - (inset * 2))
-        let holeHeight = holeWidth * desiredAspectRatio
         let heightOffsetLimit = (imageViewSize.height / 2 * finalScaleAmount) - (holeHeight / 2)
         let widthOffsetLimit = (imageViewSize.width / 2 * finalScaleAmount) - (holeWidth / 2)
         
