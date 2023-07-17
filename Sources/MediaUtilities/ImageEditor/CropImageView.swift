@@ -60,6 +60,7 @@ public struct CropImageView: View {
                 Spacer(minLength: 0)
                 VStack(spacing: 0) {
                     Spacer(minLength: 0)
+                    
                     Image(unifiedImage: inputImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -309,9 +310,21 @@ public struct CropImageView: View {
         onCompletion(img)
         isPresented = false
     }
-
+    
+    #if os(iOS)
     private func cropImage(to rect: CGRect) -> UnifiedImage? {
-        guard let cgImage = inputImage.cgImage else {
+        UIGraphicsBeginImageContext(rect.size)
+        let context = UIGraphicsGetCurrentContext()
+        let drawRect = CGRect(x: -rect.origin.x, y: -rect.origin.y, width: inputImage.size.width, height: inputImage.size.height)
+        context?.clip(to: CGRect(x: 0, y: 0, width: rect.size.width, height: rect.size.height))
+        inputImage.draw(in: drawRect)
+        let subImage = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        return subImage
+    }
+    #elseif os(macOS)
+    private func cropImage(to rect: CGRect) -> UnifiedImage? {
+        guard let cgImage = inputImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             return nil
         }
         guard let croppedCGImage = cgImage.cropping(to: rect) else {
@@ -319,20 +332,7 @@ public struct CropImageView: View {
         }
         return UnifiedImage(cgImage: croppedCGImage, size: rect.size)
     }
-}
-
-extension UnifiedImage {
-#if canImport(UIKit)
-    convenience init(cgImage: CGImage, size: CGSize) {
-        self.init(cgImage: cgImage)
-    }
-#endif
-    
-#if os(macOS)
-    var cgImage: CGImage? {
-        self.cgImage(forProposedRect: nil, context: nil, hints: nil)
-    }
-#endif
+    #endif
 }
 
 @available(iOS 14.0, macOS 11, *)
