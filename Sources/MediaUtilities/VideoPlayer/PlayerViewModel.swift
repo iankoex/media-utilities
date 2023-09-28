@@ -11,7 +11,7 @@ import SwiftUI
 
 @available(iOS 13.0, macOS 10.15, *)
 final public class PlayerViewModel: ObservableObject {
-    public let player = AVPlayer()
+    public var player = AVPlayer()
     @Published public var allowsPictureInPicturePlayback: Bool = true
     @Published public var isEditingCurrentTime = false {
         didSet { isEditingCurrentTime ? pause() : play() }

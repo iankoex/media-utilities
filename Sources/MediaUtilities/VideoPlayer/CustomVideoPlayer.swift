@@ -75,6 +75,10 @@ public struct CustomVideoPlayer: NSViewRepresentable {
 
     public func updateNSView(_ nsView: AVPlayerView, context: Context) {
         // Will be called repeatedly
+        if nsView.player != playerVM.player {
+            nsView.player = playerVM.player
+            print("Wee")
+        }
         nsView.controlsStyle = playerVM.isShowingControls ? .default : .none
         nsView.allowsPictureInPicturePlayback = playerVM.allowsPictureInPicturePlayback
     }
