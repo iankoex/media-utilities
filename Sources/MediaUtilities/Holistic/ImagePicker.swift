@@ -15,7 +15,14 @@ extension View {
         isGuarded: Bool,
         onCompletion: @escaping (Result<UnifiedImage, Error>) -> Void
     ) -> some View {
-        modifier(ImagePicker(isPresented: isPresented, aspectRatio: aspectRatio, isGuarded: isGuarded, onCompletion: onCompletion))
+        modifier(
+            ImagePicker(
+                isPresented: isPresented,
+                aspectRatio: aspectRatio,
+                isGuarded: isGuarded,
+                onCompletion: onCompletion
+            )
+        )
     }
 }
 
@@ -89,43 +96,40 @@ public struct ImagePicker: ViewModifier {
 
     private func dropCompleted(_ result: Result<UnifiedImage, Error>) {
         switch result {
-        case .success(let img):
-            withAnimation {
-                pickedOrDroppedImage = img
-            }
-        case .failure(let error):
-            withAnimation {
-                dropWasSuccessful = false
-            }
-            onCompletion(.failure(error))
+            case .success(let img):
+                withAnimation(.snappy) {
+                    pickedOrDroppedImage = img
+                }
+            case .failure(let error):
+                withAnimation(.snappy) {
+                    dropWasSuccessful = false
+                }
+                onCompletion(.failure(error))
         }
     }
 
     private func mediaImportComplete(_ result: Result<[URL], Error>) {
         switch result {
-        case let .success(urls):
-            Task {
-                let image = await getImagefromURL(url: urls[0])
-                if let image = image {
-                    withAnimation {
-                        pickedOrDroppedImage = image
+            case let .success(urls):
+                Task {
+                    let image = await getImagefromURL(url: urls[0])
+                    if let image = image {
+                        withAnimation(.snappy) {
+                            pickedOrDroppedImage = image
+                        }
+                    } else {
+                        onCompletion(.failure(MediaUtilitiesError.failedToGetImageFromURL))
                     }
-                } else {
-                    onCompletion(.failure(MediaUtilitiesError.badImage))
                 }
-            }
-        case let .failure(error):
-            onCompletion(.failure(error))
+            case let .failure(error):
+                onCompletion(.failure(MediaUtilitiesError.importImageError(error.localizedDescription)))
         }
     }
 
     private func getImagefromURL(url: URL) async -> UnifiedImage? {
-        var data: Data?
-        data = try? Data(contentsOf: url, options: .uncached)
-        guard let data = data else {
+        guard let data = try? Data(contentsOf: url, options: .uncached) else {
             return nil
         }
-        let image: UnifiedImage? = UnifiedImage(data: data)
-        return image
+        return UnifiedImage(data: data)
     }
 }

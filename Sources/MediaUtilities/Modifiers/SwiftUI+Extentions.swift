@@ -18,13 +18,23 @@ extension View {
 @available(iOS 13.0, macOS 10.15, *)
 extension View {
     func readViewSize(onChange: @escaping (CGSize) -> Void) -> some View {
-        background(
-            GeometryReader { geometryProxy in
-                Color.clear
-                    .preference(key: SizePreferenceKey.self, value: geometryProxy.size)
+        Group {
+            if #available(iOS 16.0, macOS 13.0, *) {
+                self.onGeometryChange(for: CGSize.self) { proxy in
+                    proxy.size
+                } action: { newValue in
+                    onChange(newValue)
+                }
+            } else {
+                self.background(
+                    GeometryReader { geometryProxy in
+                        Color.clear
+                            .preference(key: SizePreferenceKey.self, value: geometryProxy.size)
+                    }
+                )
+                .onPreferenceChange(SizePreferenceKey.self, perform: onChange)
             }
-        )
-        .onPreferenceChange(SizePreferenceKey.self, perform: onChange)
+        }
     }
 }
 

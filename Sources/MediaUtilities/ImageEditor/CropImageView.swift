@@ -42,6 +42,7 @@ public struct CropImageView: View {
     @State private var currentScaleAmount: CGFloat = 0
     @State private var finalScaleAmount: CGFloat = 1
     @State private var minScaleAmount: CGFloat = 1
+    @State private var minScaleAmountSet: Bool = false
     @State private var currentPosition: CGSize = .zero
     @State private var newPosition: CGSize = .zero
     @State private var isDraggingImage: Bool = false
@@ -52,26 +53,16 @@ public struct CropImageView: View {
     }
     
     var contents: some View {
-        ZStack {
+        ZStack(alignment: .center) {
             Color.black
                 .edgesIgnoringSafeArea(.all)
             
-            HStack(spacing: 0) {
-                Spacer(minLength: 0)
-                VStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    
-                    Image(unifiedImage: inputImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .readViewSize(onChange: setImageViewSize(_:))
-                        .scaleEffect(finalScaleAmount + currentScaleAmount)
-                        .offset(x: self.currentPosition.width, y: self.currentPosition.height)
-                        
-                    Spacer(minLength: 0)
-                }
-                Spacer(minLength: 0)
-            }
+            Image(unifiedImage: inputImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .readViewSize(onChange: setImageViewSize(_:))
+                .scaleEffect(finalScaleAmount + currentScaleAmount)
+                .offset(x: self.currentPosition.width, y: self.currentPosition.height)
             
             Rectangle()
                 .fill(Color.black.opacity(isDraggingImage ? 0.3 : 0.8))
@@ -169,12 +160,11 @@ public struct CropImageView: View {
     
     var tapGesture: some Gesture {
         TapGesture(count: 2)
-            .onEnded {
-                resetImageOriginAndScale()
-            }
+            .onEnded(resetImageOriginAndScale)
     }
     
     private func setImageViewSize(_ size: CGSize) {
+        guard imageViewSize != size else { return }
         imageViewSize = size
         scaleImagetoFit()
     }
@@ -192,7 +182,7 @@ public struct CropImageView: View {
     }
     
     private func resetImageOriginAndScale() {
-        withAnimation(.easeInOut) {
+        withAnimation(.snappy()) {
             currentScaleAmount = 0
             finalScaleAmount = minScaleAmount
             currentPosition = .zero
@@ -216,6 +206,11 @@ public struct CropImageView: View {
         (imageViewSize.width / 2 * finalScaleAmount) - (holeWidth / 2)
     }
     
+    /*
+     this will be called periodically during dragging
+     we dont watn to reset the finalScaleAmount and therefore
+     we need measures to prevent that
+     */
     private func scaleImagetoFit() {
         guard imageViewSize != .zero else {
             return
@@ -224,32 +219,45 @@ public struct CropImageView: View {
         let heightScaleFactor = holeHeight / imageViewSize.height
         
         if imageViewSize.height < holeHeight {
-            finalScaleAmount = heightScaleFactor
-            minScaleAmount = heightScaleFactor
+            setMinScaleAmount(heightScaleFactor)
+            setFinalScaleAmount(heightScaleFactor)
         } else if imageViewSize.width < holeWidth {
-            finalScaleAmount = widthScaleFactor
-            minScaleAmount = widthScaleFactor
+            setMinScaleAmount(widthScaleFactor)
+            setFinalScaleAmount(widthScaleFactor)
         } else {
-            minScaleAmount = max(heightScaleFactor, widthScaleFactor)
+            let sc = max(heightScaleFactor, widthScaleFactor)
+            setMinScaleAmount(sc)
         }
+    }
+    
+    private func setMinScaleAmount(_ scale: CGFloat) {
+        guard minScaleAmountSet == false else { return }
+        minScaleAmount = scale
+        finalScaleAmount = scale
+        minScaleAmountSet = true
+    }
+    
+    private func setFinalScaleAmount(_ scale: CGFloat) {
+        guard scale > minScaleAmount else { return }
+        finalScaleAmount = scale
     }
     
     private func repositionImage() {
         if finalScaleAmount > 10.0 {
-            withAnimation(.spring()) {
+            withAnimation(.snappy()) {
                 finalScaleAmount = 10.0
             }
         }
         
         if finalScaleAmount < minScaleAmount {
-            withAnimation(.spring()) {
+            withAnimation(.snappy()) {
                 finalScaleAmount = minScaleAmount
             }
         }
         
         // Leading
         if currentPosition.width > widthOffsetLimit {
-            withAnimation(.easeInOut) {
+            withAnimation(.snappy()) {
                 currentPosition.width = widthOffsetLimit
                 newPosition = currentPosition
             }
@@ -257,7 +265,7 @@ public struct CropImageView: View {
         
         // Trailing
         if currentPosition.width < -widthOffsetLimit {
-            withAnimation(.easeInOut) {
+            withAnimation(.snappy()) {
                 currentPosition.width = -widthOffsetLimit
                 newPosition = currentPosition
             }
@@ -265,7 +273,7 @@ public struct CropImageView: View {
         
         // Top
         if currentPosition.height > heightOffsetLimit {
-            withAnimation(.easeInOut) {
+            withAnimation(.snappy()) {
                 currentPosition.height = heightOffsetLimit
                 newPosition = currentPosition
             }
@@ -273,7 +281,7 @@ public struct CropImageView: View {
         
         // Bottom
         if currentPosition.height < -heightOffsetLimit {
-            withAnimation(.easeInOut) {
+            withAnimation(.snappy()) {
                 currentPosition.height = -heightOffsetLimit
                 newPosition = currentPosition
             }
@@ -281,7 +289,7 @@ public struct CropImageView: View {
     }
 
     private func setIsDraggingImage(to bool: Bool) {
-        withAnimation(.spring()) {
+        withAnimation(.snappy()) {
             isDraggingImage = bool
         }
     }
@@ -352,25 +360,3 @@ public struct Cropr_Previews: View {
         )
     }
 }
-
-//@available(iOS 14.0, macOS 11, *)
-//struct Cropr_Previews: PreviewProvider {
-//    static var previews: some View {
-//        ImageEditor(
-//            image: .constant(UnifiedImage(named: "mac")!),
-//            aspectRatio: 1,
-//            onCompletion: { img in
-//
-//            }
-//        )
-//        CropImageView(
-//            .constant(true),
-//            inputImage: UnifiedImage(named: "mac")!,
-//            desiredAspectRatio: 16/9,
-//            cancelPressed: {},
-//            onCompletion: { img in
-//
-//            }
-//        )
-//    }
-//}
