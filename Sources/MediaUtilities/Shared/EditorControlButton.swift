@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-@available(iOS 14.0, macOS 11, *)
+@available(iOS 13.0, macOS 11, *)
 struct EditorControlButton: View {
     var imageString: String
     var action: () -> Void
@@ -22,7 +22,7 @@ struct EditorControlButton: View {
             HStack(spacing: 0) {
                 Spacer(minLength: 1)
                 Image(systemName: imageString)
-                    .font(.title2)
+                    .font(.title)
                     .padding(2)
                     .grayBackgroundCircle()
                 Spacer(minLength: 1)

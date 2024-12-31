@@ -37,4 +37,10 @@ extension NSImage {
         self.init(cgImage: cgImage, size: .zero)
     }
 }
+
+extension NSImage {
+    var cgImage: CGImage? {
+        self.cgImage(forProposedRect: nil, context: nil, hints: nil)
+    }
+}
 #endif

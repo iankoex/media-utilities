@@ -7,17 +7,20 @@
 
 import SwiftUI
 
-@available(iOS 14.0, macOS 11, *)
+@available(iOS 13.0, macOS 11, *)
 public struct ImageEditor: View {
     @Binding var image: UnifiedImage?
-    var aspectRatio: CGFloat
-    var onCompletion: (Result<UnifiedImage, Error>) -> Void
+    let aspectRatio: CGFloat
+    let maskShape: MaskShape
+    let onCompletion: (Result<UnifiedImage, Error>) -> Void
     @State private var isExportCompletedSuccessfully: Bool = false
     @State private var isShowingImageCropper: Bool = false
     @State private var fallBackImage: UnifiedImage? = nil // will be used in the event of reset
 
     public var body: some View {
         ZStack {
+            Color.black
+                .edgesIgnoringSafeArea(.all)
             VStack {
                 Spacer()
             }
@@ -32,6 +35,7 @@ public struct ImageEditor: View {
                         $isShowingImageCropper,
                         inputImage: image,
                         desiredAspectRatio: aspectRatio,
+                        maskShape: maskShape,
                         cancelPressed: { },
                         onCompletion: imageCropperCompleted(_:)
                     )
@@ -41,7 +45,6 @@ public struct ImageEditor: View {
                 editorOverlay
             }
         }
-        .background(Color.black.ignoresSafeArea(.all))
         .transition(.move(edge: .bottom))
     }
 
@@ -110,11 +113,17 @@ public struct ImageEditor: View {
         }
     }
 
-    private func imageCropperCompleted(_ editedImage: UnifiedImage) {
+    private func imageCropperCompleted(_ result: Result<UnifiedImage, Error>) {
         fallBackImage = image
-        image = editedImage
-        withAnimation {
-            isExportCompletedSuccessfully = true
+        switch result {
+            case .success(let editedImage):
+                image = editedImage
+                withAnimation {
+                    isExportCompletedSuccessfully = true
+                }
+            case .failure(let error):
+                print(error.localizedDescription)
+                // Handle Error
         }
     }
 }

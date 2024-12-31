@@ -14,6 +14,7 @@ enum MediaUtilitiesError: LocalizedError {
     case badImage
     case failedToGetImageFromURL
     case importImageError(String)
+    case failedToCropImage
 
     public var errorDescription: String? {
         let base = "The operation could not be completed. "
@@ -30,6 +31,8 @@ enum MediaUtilitiesError: LocalizedError {
                 return base + "Failed to get Image from URL, if on macOS, ensure you have the correct permissions"
             case .importImageError(let str):
                 return base + "Image Import Error: \(str)"
+            case .failedToCropImage:
+                return base + "Failed to crop Image"
         }
     }
 }

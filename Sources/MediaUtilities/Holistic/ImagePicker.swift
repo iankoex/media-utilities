@@ -12,13 +12,15 @@ extension View {
     @inlinable public func imagePicker(
         _ isPresented: Binding<Bool>,
         aspectRatio: CGFloat,
-        isGuarded: Bool,
+        maskShape: MaskShape = .rectangular,
+        isGuarded: Bool = false,
         onCompletion: @escaping (Result<UnifiedImage, Error>) -> Void
     ) -> some View {
         modifier(
             ImagePicker(
                 isPresented: isPresented,
                 aspectRatio: aspectRatio,
+                maskShape: maskShape,
                 isGuarded: isGuarded,
                 onCompletion: onCompletion
             )
@@ -30,18 +32,21 @@ extension View {
 public struct ImagePicker: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
     @Binding var isPresented: Bool // Directly Controlls the MediaPicker
-    var isGuarded: Bool = false
-    var aspectRatio: CGFloat
-    var onCompletion: (Result<UnifiedImage, Error>) -> Void
+    let isGuarded: Bool
+    let aspectRatio: CGFloat
+    let maskShape: MaskShape
+    let onCompletion: (Result<UnifiedImage, Error>) -> Void
 
     public init(
         isPresented: Binding<Bool>,
         aspectRatio: CGFloat,
+        maskShape: MaskShape,
         isGuarded: Bool,
         onCompletion: @escaping (Result<UnifiedImage, Error>) -> Void
     ) {
         self._isPresented = isPresented
         self.aspectRatio = aspectRatio
+        self.maskShape = maskShape
         self.isGuarded = isGuarded
         self.onCompletion = onCompletion
     }
@@ -54,7 +59,12 @@ public struct ImagePicker: ViewModifier {
         content
             .overlay {
                 if pickedOrDroppedImage != nil {
-                    ImageEditor(image: $pickedOrDroppedImage, aspectRatio: aspectRatio, onCompletion: onCompletion)
+                    ImageEditor(
+                        image: $pickedOrDroppedImage,
+                        aspectRatio: aspectRatio,
+                        maskShape: maskShape,
+                        onCompletion: onCompletion
+                    )
                 }
             }
             .overlay {

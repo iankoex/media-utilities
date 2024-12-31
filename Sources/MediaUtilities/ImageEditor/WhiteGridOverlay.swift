@@ -1,5 +1,5 @@
 //
-//  SwiftUIView.swift
+//  WhiteGridOverlay.swift
 //  
 //
 //  Created by Ian on 01/01/2023.
@@ -7,107 +7,104 @@
 
 import SwiftUI
 
-@available(iOS 14.0, macOS 11, *)
+@available(iOS 13.0, macOS 10.15, *)
 struct WhiteGridOverlay: View {
     var screenSize: CGSize
     var inset: CGFloat
     var desiredAspectRatio: CGFloat
+    var maskShape: MaskShape
     
-    var body: some View {
-        whiteGridOverlay
-            .foregroundColor(.white)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .offset(whiteOverayRectOffset)
+    private var whiteOverlayRect: CGRect {
+        let oneSideWidth = screenSize.width - (inset * 2)
+        let oneSideHeight = oneSideWidth * desiredAspectRatio
+        
+        if oneSideHeight > screenSize.height {
+            let adjustedHeight = screenSize.height - (inset * 2)
+            let adjustedWidth = adjustedHeight * 1 / desiredAspectRatio
+            return CGRect(x: 0, y: 0, width: adjustedWidth, height: adjustedHeight)
+        } else {
+            return CGRect(x: 0, y: 0, width: oneSideWidth, height: oneSideHeight)
+        }
     }
-
-    var whiteGridOverlay: some Shape {
-        let insetRect = whiteOverayRect
-        let p1 = CGPoint(x: insetRect.minX, y: insetRect.minY)
-        let p2 = CGPoint(x: insetRect.maxX, y: insetRect.minY)
-        let p3 = CGPoint(x: insetRect.maxX, y: insetRect.maxY)
-        let p4 = CGPoint(x: insetRect.minX, y: insetRect.maxY)
-        let p5 = CGPoint(x: insetRect.minX, y: insetRect.maxY * 1/3)
-        let p6 = CGPoint(x: insetRect.minX, y: insetRect.maxY * 2/3)
-        let p7 = CGPoint(x: insetRect.maxX, y: insetRect.maxY * 1/3)
-        let p8 = CGPoint(x: insetRect.maxX, y: insetRect.maxY * 2/3)
-        let p9 = CGPoint(x: insetRect.maxX * 1/3, y: insetRect.minY)
-        let p10 = CGPoint(x: insetRect.maxX * 2/3, y: insetRect.minY)
-        let p11 = CGPoint(x: insetRect.maxX * 1/3, y: insetRect.maxY)
-        let p12 = CGPoint(x: insetRect.maxX * 2/3, y: insetRect.maxY)
-
-        var path = Path()
-
-        path.move(to: p1)
-        path.addLine(to: p1)
-        path.addLine(to: p2)
-        path.addLine(to: p3)
-        path.addLine(to: p4)
-        path.addLine(to: p1)
-        path.move(to: p5)
-        path.addLine(to: p5)
-        path.addLine(to: p7)
-        path.move(to: p6)
-        path.addLine(to: p6)
-        path.addLine(to: p8)
-        path.move(to: p9)
-        path.addLine(to: p9)
-        path.addLine(to: p11)
-        path.move(to: p10)
-        path.addLine(to: p10)
-        path.addLine(to: p12)
-
-        path = path.strokedPath(.init(lineWidth: 2))
-        path.closeSubpath()
+    
+    private var whiteOverlayRectOffset: CGSize {
+        let rect = whiteOverlayRect
+        return CGSize(width: (screenSize.width - rect.width) / 2, height: (screenSize.height - rect.height) / 2)
+    }
+    
+    private var gridLines: [(start: CGPoint, end: CGPoint)] {
+        let rect = whiteOverlayRect
+        let p1 = CGPoint(x: rect.minX, y: rect.minY)
+        let p2 = CGPoint(x: rect.maxX, y: rect.minY)
+        let p3 = CGPoint(x: rect.maxX, y: rect.maxY)
+        let p4 = CGPoint(x: rect.minX, y: rect.maxY)
+        let p5 = CGPoint(x: rect.minX, y: rect.maxY / 3)
+        let p6 = CGPoint(x: rect.minX, y: rect.maxY * 2 / 3)
+        let p7 = CGPoint(x: rect.maxX, y: rect.maxY / 3)
+        let p8 = CGPoint(x: rect.maxX, y: rect.maxY * 2 / 3)
+        let p9 = CGPoint(x: rect.maxX / 3, y: rect.minY)
+        let p10 = CGPoint(x: rect.maxX * 2 / 3, y: rect.minY)
+        let p11 = CGPoint(x: rect.maxX / 3, y: rect.maxY)
+        let p12 = CGPoint(x: rect.maxX * 2 / 3, y: rect.maxY)
+        
+        return [
+            // Outer rectangle lines for grid purposes (these will be ignored when mask is circular)
+            (p1, p2), (p2, p3), (p3, p4), (p4, p1),
+            
+            // Vertical grid lines
+            (p5, p7), (p6, p8),
+            
+            // Horizontal grid lines
+            (p9, p11), (p10, p12)
+        ]
+    }
+    
+    private var gridOverlayPath: Path {
+        let path = Path { path in
+            let lines = gridLines
+            for line in lines {
+                path.move(to: line.start)
+                path.addLine(to: line.end)
+            }
+        }
         return path
     }
-
-    var whiteOverayRect: CGRect {
-        let oneSideW = screenSize.width - (inset * 2)
-        let oneSideH = oneSideW * desiredAspectRatio
-        let insetRect = CGRect(
-            x: 0,
-            y: 0,
-            width: oneSideW,
-            height: oneSideH
-        )
-        if oneSideH > screenSize.height {
-            let rect1 = CGRect(x: 0, y: 0, width: screenSize.width, height: screenSize.height)
-            let oneSideH1 = rect1.maxY - (inset * 2)
-            let oneSideW1 = oneSideH1 * 1 / desiredAspectRatio
-
-            let insetRect1 = CGRect(
-                x: 0,
-                y: 0,
-                width: oneSideW1,
-                height: oneSideH1
-            )
-            return insetRect1
+    
+    var body: some View {
+        ZStack(alignment: .center) {
+            // Draw border
+            whiteGridOverlayBorder
+                .strokedPath(.init(lineWidth: 1.5))
+                .fill(.white)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .offset(whiteOverlayRectOffset)
+            
+            // Mask with grid
+            whiteGridOverlayBorder
+                .fill(.white)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .offset(whiteOverlayRectOffset)
+                .mask(
+                    gridOverlayPath
+                        .stroke(.white, lineWidth: 1.5)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .offset(whiteOverlayRectOffset)
+                )
         }
-        return insetRect
     }
-
-    var whiteOverayRectOffset: CGSize {
-        let oneSideW = screenSize.width - (inset * 2)
-        let oneSideH = oneSideW * desiredAspectRatio
-        let halfSideX = oneSideW / 2
-        let halfSideY = oneSideH / 2
-        let insetRectOffset = CGSize(
-            width: (screenSize.width / 2) - halfSideX,
-            height: (screenSize.height / 2) - halfSideY
-        )
-        if oneSideH > screenSize.height {
-            let rect1 = CGRect(x: 0, y: 0, width: screenSize.width, height: screenSize.height)
-            let oneSideH1 = rect1.maxY - (inset * 2)
-            let oneSideW1 = oneSideH1 * 1 / desiredAspectRatio
-
-            let halfSideX1 = oneSideW1 / 2
-            let halfSideY1 = oneSideH1 / 2
-            let insetRectOffset1 = CGSize(
-                width: (rect1.maxX / 2) - halfSideX1,
-                height: (rect1.maxY / 2) - halfSideY1
-            )
-            return insetRectOffset1
+    
+    private var whiteGridOverlayBorder: Path {
+        let path = Path { path in
+            let insetRect = whiteOverlayRect
+            if maskShape == .circular {
+                let center = CGPoint(x: insetRect.midX, y: insetRect.midY)
+                let radius = min(insetRect.width, insetRect.height) / 2
+                path.addArc(center: center, radius: radius, startAngle: .zero, endAngle: .degrees(360), clockwise: true)
+            } else {
+                path.addRect(insetRect)
+            }
+            path.closeSubpath()
         }
-        return insetRectOffset
+        return path
     }
 }

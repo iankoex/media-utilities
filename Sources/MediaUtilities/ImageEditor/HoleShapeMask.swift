@@ -7,8 +7,13 @@
 
 import SwiftUI
 
-@available(iOS 14.0, macOS 11, *)
-func HoleShapeMask(screenSize: CGSize, inset: CGFloat, desiredAspectRatio: CGFloat) -> Path {
+@available(iOS 13.0, macOS 10.15, *)
+func HoleShapeMask(
+    screenSize: CGSize,
+    inset: CGFloat,
+    desiredAspectRatio: CGFloat,
+    maskShape: MaskShape
+) -> Path {
     let rect = CGRect(x: 0, y: 0, width: screenSize.width, height: screenSize.height)
     var insetRect: CGRect {
         let oneSideW = rect.maxX - (inset * 2)
@@ -37,9 +42,29 @@ func HoleShapeMask(screenSize: CGSize, inset: CGFloat, desiredAspectRatio: CGFlo
         }
         return insetRect
     }
-
+    
+    // Create the main shape (rectangle)
     var shape = Rectangle().path(in: rect)
-    shape.addPath(Rectangle().path(in: insetRect))
-
+    
+    switch maskShape {
+        case .circular:
+            let circleDiameter = min(rect.width, rect.height) - (inset * 2)
+            let circleRect = CGRect(
+                x: (rect.maxX / 2) - (circleDiameter / 2),
+                y: (rect.maxY / 2) - (circleDiameter / 2),
+                width: circleDiameter,
+                height: circleDiameter
+            )
+            
+            shape.addPath(Path(ellipseIn: circleRect))
+            
+        case .rectangular:
+            shape.addPath(Rectangle().path(in: insetRect))
+    }
+    
     return shape
+}
+
+public enum MaskShape: CaseIterable {
+    case circular, rectangular
 }
