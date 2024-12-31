@@ -19,6 +19,10 @@ class DropDelegateService: ObservableObject {
     @Published var attempts: CGFloat = 0
     @Published var isCopyingFile: Bool = false
     @Published var progress = Progress()
+    // Helpers for a bug in macOS where you can't drop from Safari
+    // Tried NSPasteBoard with no success this is the workaround I found
+    var temporaryImage: UnifiedImage? = nil
+    var anItemWasDropped: Bool = false
 
     private func processAttempts() {
         if isAllowed == false {

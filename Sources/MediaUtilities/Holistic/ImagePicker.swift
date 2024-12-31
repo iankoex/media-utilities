@@ -43,11 +43,6 @@ public struct ImagePicker: ViewModifier {
     @State private var dropWasSuccessful: Bool = false
     @State private var pickedOrDroppedImage: UnifiedImage? = nil // Dropped or Picked
 
-    /*
-     The Upload logic should be handled in this View then return the link
-     the link can then be used at will to update the server.
-     */
-
     public func body(content: Content) -> some View {
         content
             .overlay {
@@ -95,12 +90,10 @@ public struct ImagePicker: ViewModifier {
     private func dropCompleted(_ result: Result<UnifiedImage, Error>) {
         switch result {
         case .success(let img):
-            print("dropCompleted Image)")
             withAnimation {
                 pickedOrDroppedImage = img
             }
         case .failure(let error):
-            print("dropCompleted Error \(error)")
             withAnimation {
                 dropWasSuccessful = false
             }
@@ -119,12 +112,10 @@ public struct ImagePicker: ViewModifier {
                     }
                 } else {
                     onCompletion(.failure(MediaUtilitiesError.badImage))
-                    print("Failed: Optional Image")
                 }
             }
         case let .failure(error):
             onCompletion(.failure(error))
-            print("mediaImportComplete Failed: \(error.localizedDescription)")
         }
     }
 

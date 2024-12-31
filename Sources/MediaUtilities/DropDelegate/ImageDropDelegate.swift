@@ -16,6 +16,9 @@ struct ImageDropDelegate: DropDelegate {
     func dropEntered(info: DropInfo) {
         withAnimation {
             dropService.isActive = true
+            // reset the helpers
+            dropService.temporaryImage = nil
+            dropService.anItemWasDropped = false
         }
     }
 
@@ -31,18 +34,14 @@ struct ImageDropDelegate: DropDelegate {
     }
 
     func validateDrop(info: DropInfo) -> Bool {
-        print("Here 1")
         guard dropService.isGuarded == false else {
             return false
         }
-        print("Here 2")
         guard let itemProvider = info.itemProviders(for: [.image, .url, .fileURL]).first else {
             return false
         }
-        print("Here 3")
         if itemProvider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
             itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.url.identifier) { data, _ in
-                print("Here 4")
                 guard let data = data, let path = NSString(data: data, encoding: 4), let url = URL(string: path as String) else {
                     return
                 }
@@ -54,25 +53,23 @@ struct ImageDropDelegate: DropDelegate {
                 }
                 if utType.conforms(to: .image) || utType.conforms(to: .url) || utType.conforms(to: .fileURL) {
                     dropService.setIsAllowed(to: true)
-                    print("Here 7 11")
                 } else {
                     dropService.setIsAllowed(to: false)
-                    print("Here 7 22")
                 }
             }
         } else if itemProvider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-            print("here 8")
+            dropService.setIsAllowed(to: true)
+            // There is a bug where this NSItemProvider can load image but the one on performDrop(info: DropInfo) can't
             itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
-                guard let data = data else {
+                guard let data else {
                     return
                 }
-                let img = UnifiedImage(data: data)
-                guard img != nil else {
+                guard let image = UnifiedImage(data: data) else {
                     dropService.setIsAllowed(to: false)
                     return
                 }
-                print("here 10")
-                dropService.setIsAllowed(to: true)
+                dropService.temporaryImage = image
+                completeDropFromTempImageHack(image)
             }
         } else {
             dropService.setIsAllowed(to: false)
@@ -89,52 +86,70 @@ struct ImageDropDelegate: DropDelegate {
         guard dropService.isAllowed else {
             return false
         }
-        if let item = info.itemProviders(for: [.image, .url, .fileURL]).first {
-            if item.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
-                Task {
-                    #if os(iOS)
-                    let nsSecureCoding = try await item.loadItem(forTypeIdentifier: UTType.image.identifier, options: nil)
-                    if let urlData = nsSecureCoding as? Data {
-                        if let img = UnifiedImage(data: urlData) {
-                            dropCompleted(.success(img))
-                        } else {
-                            dropCompleted(.failure(MediaUtilitiesError.badImage))
-                        }
-                        withAnimation {
-//                            isActive = false
-                        }
-                    }
-                    #endif
-                    #if os(macOS)
-                    let nsSecureCoding = try await item.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil)
-                    if let urlData = nsSecureCoding as? Data {
-                        let url = NSURL(absoluteURLWithDataRepresentation: urlData, relativeTo: nil) as URL
-                        if let img = NSImage(contentsOf: url) {
-                            dropCompleted(.success(img))
-                        } else {
-                            dropCompleted(.failure(MediaUtilitiesError.badImage))
-                        }
-                    }
-                    #endif
-                }
-            } else if item.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-                item.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
-                    guard let data = data else {
-                        dropCompleted(.failure(MediaUtilitiesError.badImage))
-                        return
-                    }
-                    guard let img = UnifiedImage(data: data) else {
-                        dropCompleted(.failure(MediaUtilitiesError.badImage))
-                        return
-                    }
-                    dropCompleted(.success(img))
-                }
-            }
-        } else {
+        dropService.anItemWasDropped = true
+        guard let itemProvider = info.itemProviders(for: [.image, .url, .fileURL]).first else {
             dropCompleted(.failure(MediaUtilitiesError.lacksConformingTypeIdentifiers))
             return false
         }
+        
+        if itemProvider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+            Task {
+#if os(iOS)
+                let nsSecureCoding = try await itemProvider.loadItem(forTypeIdentifier: UTType.image.identifier, options: nil)
+                if let urlData = nsSecureCoding as? Data {
+                    if let img = UnifiedImage(data: urlData) {
+                        dropCompleted(.success(img))
+                    } else {
+                        dropCompleted(.failure(MediaUtilitiesError.badImage))
+                    }
+                }
+#endif
+#if os(macOS)
+                let nsSecureCoding = try await itemProvider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil)
+                if let urlData = nsSecureCoding as? Data {
+                    let url = NSURL(absoluteURLWithDataRepresentation: urlData, relativeTo: nil) as URL
+                    if let img = NSImage(contentsOf: url) {
+                        dropCompleted(.success(img))
+                    } else {
+                        dropCompleted(.failure(MediaUtilitiesError.badImage))
+                    }
+                }
+#endif
+            }
+        } else if itemProvider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+            if let image = dropService.temporaryImage {
+                completeDropFromTempImageHack(image)
+            } else {
+                itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                    DispatchQueue.main.async {
+                        guard let data = data else {
+                            dropCompleted(.failure(MediaUtilitiesError.badImage))
+                            return
+                        }
+                        guard let img = UnifiedImage(data: data) else {
+                            dropCompleted(.failure(MediaUtilitiesError.badImage))
+                            return
+                        }
+                        dropCompleted(.success(img))
+                    }
+                }
+            }
+        }
         dropService.isValidated = false
         return true
+    }
+    
+    func completeDropFromTempImageHack(_ image: UnifiedImage) {
+        guard dropService.isGuarded == false else {
+            return
+        }
+        guard dropService.isAllowed else {
+            return
+        }
+        guard dropService.anItemWasDropped else {
+            return
+        }
+        dropCompleted(.success(image))
+        dropService.temporaryImage = nil
     }
 }
