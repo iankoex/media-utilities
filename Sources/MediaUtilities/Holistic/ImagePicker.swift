@@ -7,13 +7,50 @@
 
 import SwiftUI
 
+
 @available(iOS 14.0, macOS 11, *)
 extension View {
+    /// an holictic image picker that allows for picking or dropping image to the attached view and editing the image before retuning the final image.
+    /// the image editor uses gestures, keep this in mind when attaching this modifier to a sheet, a scrollview or any view with gestures enabled
+    /// - Parameters:
+    ///   - isPresented: a bool that directly controls the media picker
+    ///   - aspectRatio: desired aspect ratio, when the mash shape is curcular this value is ignored in favour of 1
+    ///   - maskShape: desired mask shape, when you choose circular the aspect ratio is automatically 1
+    ///   - isGuarded: a bool that indicates wheather the attched view can accept dropping of images
+    ///   - onCompletion: call back with a result of type `Result<UnifiedImage, Error>`
+    ///
     @inlinable public func imagePicker(
         _ isPresented: Binding<Bool>,
         aspectRatio: CGFloat,
         maskShape: MaskShape = .rectangular,
         isGuarded: Bool = false,
+        onCompletion: @escaping (Result<UnifiedImage, Error>) -> Void
+    ) -> some View {
+        modifier(
+            ImagePicker(
+                isPresented: isPresented,
+                aspectRatio: aspectRatio,
+                maskShape: maskShape,
+                isGuarded: .constant(isGuarded),
+                onCompletion: onCompletion
+            )
+        )
+    }
+    
+    /// an holictic image picker that allows for picking or dropping image to the attached view and editing the image before retuning the final image.
+    /// the image editor uses gestures, keep this in mind when attaching this modifier to a sheet, a scrollview or any view with gestures enabled
+    /// - Parameters:
+    ///   - isPresented: a bool that directly controls the media picker
+    ///   - aspectRatio: desired aspect ratio, when the mash shape is curcular this value is ignored in favour of 1
+    ///   - maskShape: desired mask shape, when you choose circular the aspect ratio is automatically 1
+    ///   - isGuarded: a bool that indicates wheather the attched view can accept dropping of images
+    ///   - onCompletion: call back with a result of type `Result<UnifiedImage, Error>`
+    ///
+    @inlinable public func imagePicker(
+        _ isPresented: Binding<Bool>,
+        aspectRatio: CGFloat,
+        maskShape: MaskShape = .rectangular,
+        isGuarded: Binding<Bool>,
         onCompletion: @escaping (Result<UnifiedImage, Error>) -> Void
     ) -> some View {
         modifier(
@@ -32,7 +69,7 @@ extension View {
 public struct ImagePicker: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
     @Binding var isPresented: Bool // Directly Controlls the MediaPicker
-    let isGuarded: Bool
+    @Binding var isGuarded: Bool
     let aspectRatio: CGFloat
     let maskShape: MaskShape
     let onCompletion: (Result<UnifiedImage, Error>) -> Void
@@ -41,29 +78,31 @@ public struct ImagePicker: ViewModifier {
         isPresented: Binding<Bool>,
         aspectRatio: CGFloat,
         maskShape: MaskShape,
-        isGuarded: Bool,
+        isGuarded: Binding<Bool>,
         onCompletion: @escaping (Result<UnifiedImage, Error>) -> Void
     ) {
         self._isPresented = isPresented
         self.aspectRatio = aspectRatio
         self.maskShape = maskShape
-        self.isGuarded = isGuarded
+        self._isGuarded = isGuarded
         self.onCompletion = onCompletion
     }
     
     @StateObject var dropService: DropDelegateService = .init()
-    @State private var dropWasSuccessful: Bool = false
     @State private var pickedOrDroppedImage: UnifiedImage? = nil // Dropped or Picked
 
     public func body(content: Content) -> some View {
         content
             .overlay {
-                if pickedOrDroppedImage != nil {
+                if let pickedOrDroppedImage {
                     ImageEditor(
-                        image: $pickedOrDroppedImage,
+                        image: pickedOrDroppedImage,
                         aspectRatio: aspectRatio,
                         maskShape: maskShape,
-                        onCompletion: onCompletion
+                        onCompletion: { editorResult in
+                            self.pickedOrDroppedImage = nil
+                            onCompletion(editorResult)
+                        }
                     )
                 }
             }
@@ -111,9 +150,6 @@ public struct ImagePicker: ViewModifier {
                     pickedOrDroppedImage = img
                 }
             case .failure(let error):
-                withAnimation(.snappy) {
-                    dropWasSuccessful = false
-                }
                 onCompletion(.failure(error))
         }
     }

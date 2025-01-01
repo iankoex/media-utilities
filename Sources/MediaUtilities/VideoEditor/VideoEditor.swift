@@ -45,7 +45,7 @@ public struct VideoEditor: View {
             videoOverlay
         }
         .background(Color.black.ignoresSafeArea(.all))
-        .transition(.move(edge: .bottom))
+        .transition(.move(edge: .bottom).animation(.snappy))
         .overlay {
             if isExporting {
                 exportingOverlay
@@ -147,7 +147,7 @@ public struct VideoEditor: View {
             }
             .navigationTitle("Exporting Video...")
         }
-        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .transition(.move(edge: .bottom).animation(.snappy))
     }
     
     private func cancelButtonActions() {

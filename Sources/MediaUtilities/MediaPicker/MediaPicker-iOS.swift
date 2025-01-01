@@ -76,7 +76,7 @@ fileprivate struct MediaPickerWrapper: View {
                 .padding()
                 .navigationTitle("Importing Media...")
         }
-        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .transition(.move(edge: .bottom).animation(.snappy))
     }
 }
 

@@ -8,6 +8,7 @@
 import Foundation
 
 enum MediaUtilitiesError: LocalizedError {
+    case cancelled
     case nilImage
     case isGuarded
     case lacksConformingTypeIdentifiers
@@ -22,6 +23,8 @@ enum MediaUtilitiesError: LocalizedError {
     public var errorDescription: String? {
         let base = "The operation could not be completed. "
         switch self {
+            case .cancelled:
+                return base + "operation was cancelled"
             case .nilImage:
                 return base + "Image is nil, for one reason or another"
             case .isGuarded:

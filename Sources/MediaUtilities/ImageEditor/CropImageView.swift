@@ -14,7 +14,6 @@ import AppKit
 
 @available(iOS 13.0, macOS 11, *)
 public struct CropImageView: View {
-    @Binding var isPresented: Bool
     let inputImage: UnifiedImage
     let desiredAspectRatio: CGFloat
     let maskShape: MaskShape
@@ -22,14 +21,12 @@ public struct CropImageView: View {
     let onCompletion: (Result<UnifiedImage, Error>) -> Void
 
     public init(
-        _ isPresented: Binding<Bool>,
         inputImage: UnifiedImage,
         desiredAspectRatio: CGFloat,
         maskShape: MaskShape,
         cancelPressed: @escaping () -> Void,
         onCompletion: @escaping (Result<UnifiedImage, Error>) -> Void
     ) {
-        self._isPresented = isPresented
         self.inputImage = inputImage
         self.desiredAspectRatio = maskShape == .circular ? 1 : 1 / desiredAspectRatio
         self.maskShape = maskShape
@@ -99,7 +96,7 @@ public struct CropImageView: View {
     var cropImageViewOverlay: some View {
         VStack {
             HStack {
-                EditorControlButton("xmark.circle", action: closeCancelAction)
+                EditorControlButton("xmark.circle", action: cancelPressed)
                 Spacer()
                 Text("Move and Scale")
                 Spacer()
@@ -188,12 +185,6 @@ public struct CropImageView: View {
         screenSize = size
         resetImageOriginAndScale()
         scaleImagetoFit()
-    }
-
-    private func closeCancelAction() {
-        withAnimation {
-            isPresented = false
-        }
     }
     
     private func resetImageOriginAndScale() {
@@ -329,10 +320,8 @@ public struct CropImageView: View {
             do {
                 let image = try await MediaUtilities.cropImage(inputImage, to: rect, using: maskShape)
                 onCompletion(.success(image))
-                isPresented = false
             } catch {
                 onCompletion(.failure(error))
-                isPresented = false
             }
         }
     }
@@ -345,7 +334,6 @@ public struct Cropr_Previews: View {
     
     public var body: some View {
         CropImageView(
-            .constant(true),
             inputImage: UnifiedImage(named: "sunflower")!,
             desiredAspectRatio: 16/9,
             maskShape: .rectangular,

@@ -115,7 +115,7 @@ public struct VideoPicker: ViewModifier {
             }
         }
         .background(colorScheme == .dark ? Color.black : Color.white)
-        .transition(.move(edge: .bottom))
+        .transition(.move(edge: .bottom).animation(.snappy))
     }
 
     var downloadingView: some View {

@@ -75,4 +75,37 @@ public struct MediaUtilities {
         }
         return UnifiedImage(cgImage: outputCGImage)
     }
+    
+    /// WORK IN PROGRESS
+    /// straighten the specified image by the specified angle,
+    /// remember that if you use 90 degrees here that the resulting image will still have the same dimentions as input image
+    /// - Parameters:
+    ///   - image: image to be straightened
+    ///   - angle: desired angle
+    /// - Returns: a straightened `UnifiedImage`
+    /// - Throws: `MediaUtilitiesError.straightenImageError` depending on the error
+    static func straightenImage(_ image: UnifiedImage, angle: Measurement<UnitAngle>) throws -> UnifiedImage {
+        guard let image = image.withCorrectOrientation else {
+            throw MediaUtilitiesError.straightenImageError("couldn't get correct orientation")
+        }
+        guard let cgImage = image.cgImage else {
+            throw MediaUtilitiesError.straightenImageError("couldn't get cgImage")
+        }
+        let ciImage = CIImage(cgImage: cgImage)
+        guard let filter = CIFilter(name: "CIStraightenFilter") else {
+            throw MediaUtilitiesError.badImage
+        }
+        let rotationInRadians = angle.converted(to: .radians).value
+        filter.setDefaults()
+        filter.setValue(ciImage, forKey: kCIInputImageKey)
+        filter.setValue(rotationInRadians, forKey: kCIInputAngleKey)
+        guard let outputImage = filter.outputImage else {
+            throw MediaUtilitiesError.badImage
+        }
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(outputImage, from: outputImage.extent) else {
+            throw MediaUtilitiesError.straightenImageError("couldn't create CGImage from CIImage")
+        }
+        return UnifiedImage(cgImage: cgImage)
+    }
 }
