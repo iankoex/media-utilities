@@ -13,7 +13,7 @@ public struct ImageEditor: View {
     let aspectRatio: CGFloat
     let maskShape: MaskShape
     let onCompletion: (Result<UnifiedImage, Error>) -> Void
-    @State private var isExportCompletedSuccessfully: Bool = false
+    @State private var imageHasBeenEdited: Bool = false
     @State private var isShowingImageCropper: Bool = false
     @State private var fallBackImage: UnifiedImage? = nil // will be used in the event of reset
 
@@ -53,11 +53,7 @@ public struct ImageEditor: View {
             HStack(alignment: .top) {
                 cancelButton
                 Spacer()
-                if isExportCompletedSuccessfully {
-                    doneButton
-                } else {
-                    controlsButtons
-                }
+                controlsButtons
             }
             .padding(.top)
             Spacer()
@@ -69,7 +65,7 @@ public struct ImageEditor: View {
 
     var cancelButton: some View {
         EditorControlButton(
-            isExportCompletedSuccessfully ? "pencil.circle" : "xmark.circle",
+            imageHasBeenEdited ? "pencil.circle" : "xmark.circle",
             action: cancelButtonActions
         )
     }
@@ -78,6 +74,7 @@ public struct ImageEditor: View {
         VStack(spacing: 15) {
             doneButton
             EditorControlButton("crop", action: showCropImageView)
+            EditorControlButton("rotate.left", action: rotateImage)
         }
     }
 
@@ -86,10 +83,10 @@ public struct ImageEditor: View {
     }
 
     private func cancelButtonActions() {
-        if isExportCompletedSuccessfully {
+        if imageHasBeenEdited {
             image = fallBackImage
             withAnimation {
-                isExportCompletedSuccessfully = false
+                imageHasBeenEdited = false
             }
         } else {
             withAnimation {
@@ -102,6 +99,8 @@ public struct ImageEditor: View {
         withAnimation {
             if let img = image {
                 onCompletion(.success(img))
+            } else {
+                onCompletion(.failure(MediaUtilitiesError.nilImage))
             }
             image = nil
         }
@@ -119,11 +118,25 @@ public struct ImageEditor: View {
             case .success(let editedImage):
                 image = editedImage
                 withAnimation {
-                    isExportCompletedSuccessfully = true
+                    imageHasBeenEdited = true
                 }
             case .failure(let error):
                 print(error.localizedDescription)
                 // Handle Error
+        }
+    }
+    
+    private func rotateImage() {
+        guard let image else { return }
+        do {
+            let angle: Measurement<UnitAngle> = Measurement(value: -90, unit: .degrees)
+            let rotatedImage = try MediaUtilities.rotateImage(image, angle: angle)
+            self.image = rotatedImage
+            withAnimation {
+                imageHasBeenEdited = true
+            }
+        } catch {
+            print(error.localizedDescription)
         }
     }
 }
