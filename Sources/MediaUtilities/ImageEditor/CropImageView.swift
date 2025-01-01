@@ -326,26 +326,15 @@ public struct CropImageView: View {
         )
         
         Task {
-            guard let img = await cropImage(to: rect) else {
-                onCompletion(.failure(MediaUtilitiesError.failedToCropImage))
+            do {
+                let image = try await MediaUtilities.cropImage(inputImage, to: rect, using: maskShape)
+                onCompletion(.success(image))
                 isPresented = false
-                return
+            } catch {
+                onCompletion(.failure(error))
+                isPresented = false
             }
-            onCompletion(.success(img))
-            isPresented = false
         }
-    }
-    
-    private func cropImage(to rect: CGRect) async -> UnifiedImage? {
-        guard let cgImage = inputImage.cgImage else {
-            return nil
-        }
-        guard let croppedCGImage = cgImage.cropping(to: rect) else {
-            return nil
-        }
-        let croppedImage = UnifiedImage(cgImage: croppedCGImage)
-        let finalImage = maskShape == .circular ? croppedImage.cropToCircle() : croppedImage
-        return finalImage
     }
 }
 
@@ -367,63 +356,3 @@ public struct Cropr_Previews: View {
         )
     }
 }
-
-#if os(iOS)
-
-extension UIImage {
-    func cropToCircle() -> UIImage? {
-        let imageSize = self.size
-        let diameter = min(imageSize.width, imageSize.height)
-        let circleRect = CGRect(x: 0, y: 0, width: diameter, height: diameter)
-        
-        UIGraphicsBeginImageContextWithOptions(circleRect.size, false, 0.0)
-        let context = UIGraphicsGetCurrentContext()
-        
-        let path = UIBezierPath(ovalIn: circleRect)
-        context?.addPath(path.cgPath)
-        context?.clip()
-        
-        self.draw(in: CGRect(
-            x: -((imageSize.width - diameter) / 2),
-            y: -((imageSize.height - diameter) / 2),
-            width: imageSize.width,
-            height: imageSize.height
-        ))
-        
-        let circularImage = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        
-        return circularImage
-    }
-}
-
-#endif
-
-#if os(macOS)
-
-extension NSImage {
-    func cropToCircle() -> NSImage? {
-        let imageSize = self.size
-        let diameter = min(imageSize.width, imageSize.height)
-        let circleRect = NSRect(x: 0, y: 0, width: diameter, height: diameter)
-        
-        let croppedImage = NSImage(size: circleRect.size)
-        croppedImage.lockFocus()
-        
-        let path = NSBezierPath(ovalIn: circleRect)
-        path.addClip()
-        
-        self.draw(in: NSRect(
-            x: -((imageSize.width - diameter) / 2),
-            y: -((imageSize.height - diameter) / 2),
-            width: imageSize.width,
-            height: imageSize.height
-        ))
-        
-        croppedImage.unlockFocus()
-        return croppedImage
-    }
-}
-
-#endif
-
