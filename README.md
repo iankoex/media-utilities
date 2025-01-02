@@ -32,6 +32,7 @@ Feel free to add your implementations and submit a pr.
 
 
 ```swift
+
 /// an holictic image picker that allows for picking or dropping image to the attached view and editing the image before retuning the final image.
 /// the image editor uses gestures, keep this in mind when attaching this modifier to a sheet, a scrollview or any view with gestures enabled
 /// - Parameters:
@@ -48,16 +49,28 @@ Feel free to add your implementations and submit a pr.
     isGuarded: Binding<Bool>,
     onCompletion: @escaping (Result<UnifiedImage, Error>) -> Void
 ) -> some View
+
 ```
 
 
 ### Videos
 
 ```swift
-// For Videos
-.videoPicker($isShowingVideoPicker) { result in
 
-}
+
+/// an holictic video picker that allows for picking or dropping of videos or url with videos to the attached view
+/// and editing of the video before retuning the url in the local file sytem.
+/// internet urls will be downloaded before editing the video.
+/// - Parameters:
+///   - isPresented: a bool that directly controls the media picker
+///   - isGuarded: a bool that indicates whether the attched view can accept dropping of url or video
+///   - onCompletion: call back with a result of type `Result<URL, Error>`, the url is a local file url
+@inlinable public func videoPicker(
+    _ isPresented: Binding<Bool>,
+    isGuarded: Binding<Bool>,
+    onCompletion: @escaping (Result<URL, Error>) -> Void
+) -> some View
+
 ```
 
 What this allows you to do is enable drag and drop to the view,edit the asset then retun the edited asset.

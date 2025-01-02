@@ -15,7 +15,7 @@ class DropDelegateService: ObservableObject {
         didSet { processAttempts() }
     }
     @Published var isAllowed: Bool = false
-    @Published var isGuarded: Bool = false
+    @Published var isGuarded: Bool
     @Published var attempts: CGFloat = 0
     @Published var isCopyingFile: Bool = false
     @Published var progress = Progress()
@@ -23,6 +23,12 @@ class DropDelegateService: ObservableObject {
     // Tried NSPasteBoard with no success this is the workaround I found
     var temporaryImage: UnifiedImage? = nil
     var anItemWasDropped: Bool = false
+    
+    init(
+        isGuarded: Bool
+    ) {
+        self.isGuarded = isGuarded
+    }
 
     private func processAttempts() {
         if isAllowed == false {

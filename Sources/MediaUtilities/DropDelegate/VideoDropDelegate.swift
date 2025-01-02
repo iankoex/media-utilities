@@ -8,7 +8,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import AVFoundation
-//import AVKit
 import Combine
 
 /*
@@ -48,25 +47,18 @@ struct VideoDropDelegate: DropDelegate {
             return false
         }
         if itemProvider.hasItemConformingToTypeIdentifier(DropDelegateService.urlIndentifier) {
-            print("has url")
-
             itemProvider.loadDataRepresentation(forTypeIdentifier: DropDelegateService.urlIndentifier) { data, _ in
                 guard let data = data, let path = NSString(data: data, encoding: 4), let url = URL(string: path as String) else {
-                    print("ER")
                     return
                 }
-                print("URL", url)
                 let asset = AVAsset(url: url)
                 if asset.isPlayable {
-                    print("Conforms")
                     dropService.setIsAllowed(to: true)
                 } else {
-                    print("Does Not CONFORM")
                     dropService.setIsAllowed(to: false)
                 }
             }
         } else if itemProvider.hasItemConformingToTypeIdentifier(DropDelegateService.audioVisualContentIndentifier) {
-            print("Has audsio visual")
             dropService.isAllowed = true
         }
         dropService.isValidated = true
@@ -78,51 +70,40 @@ struct VideoDropDelegate: DropDelegate {
             dropCompleted(.failure(MediaUtilitiesError.isGuarded))
             return false
         }
-//        guard isAllowed else {
-//            return false
-//        }
         guard let itemProvider = info.itemProviders(for: DropDelegateService.audioVisualIdentifiers).first else {
             dropCompleted(.failure(MediaUtilitiesError.lacksConformingTypeIdentifiers))
             return false
         }
         if itemProvider.hasItemConformingToTypeIdentifier(DropDelegateService.urlIndentifier) {
             Task {
-                #if os(iOS)
-                let nsSecureCoding = try await itemProvider.loadItem(forTypeIdentifier: DropDelegateService.urlIndentifier, options: nil)
-                if let urlData = nsSecureCoding as? Data {
-                    let str = try? JSONDecoder().decode(URL.self, from: urlData)
-                    print(str, "URLLLL")
-                }
-                #endif
-                #if os(macOS)
                 let nsSecureCoding = try await itemProvider.loadItem(forTypeIdentifier: DropDelegateService.urlIndentifier, options: nil)
                 guard let urlData = nsSecureCoding as? Data else {
                     return
                 }
                 let url = NSURL(absoluteURLWithDataRepresentation: urlData, relativeTo: nil) as URL
-                print(url, "URLLLL")
                 let asset = AVAsset(url: url)
                 if asset.isPlayable {
                     dropCompleted(.success(url))
                 } else {
                     dropCompleted(.failure(MediaUtilitiesError.lacksAudioVisualContent))
                 }
-                #endif
             }
         } else if itemProvider.hasItemConformingToTypeIdentifier(DropDelegateService.audioVisualContentIndentifier) {
-            print("audiovisualContentaudiovisualContent")
             let progress: Progress = itemProvider.loadFileRepresentation(forTypeIdentifier: DropDelegateService.audioVisualContentIndentifier) { url, err in
                 guard let url = url, err == nil else {
                     dropCompleted(.failure(err!))
                     return
                 }
                 MediaPicker.copyContents(of: url) { localURL, error in
-                    guard let localURL = localURL, error == nil else {
+                    if let error {
                         dropService.setIsCopying(to: false)
-                        dropCompleted(.failure(error!))
+                        dropCompleted(.failure(error))
                         return
                     }
-                    print("localURl", localURL)
+                    guard let localURL else {
+                        dropService.setIsCopying(to: false)
+                        return
+                    }
                     dropService.setIsCopying(to: false)
                     dropCompleted(.success(localURL))
                 }
@@ -131,15 +112,10 @@ struct VideoDropDelegate: DropDelegate {
             dropService.progress.addChild(progress, withPendingUnitCount: 1)
 
             // Monitor isCancelled for the case of importing from Photos.app
-            dropService.progress.publisher(for: \.fractionCompleted)
-                .sink { fractionCompleted in
-                    print("fractionCompleted", fractionCompleted)
-                }
-                .store(in: &subscriptions)
             dropService.progress.publisher(for: \.isCancelled)
                 .filter( { $0 == true })
                 .sink { isCancelled in
-                    print("isCancelled", isCancelled)
+                    dropCompleted(.failure(MediaUtilitiesError.cancelled))
                 }
                 .store(in: &subscriptions)
         } else {
@@ -150,21 +126,3 @@ struct VideoDropDelegate: DropDelegate {
         return true
     }
 }
-
-/*
- itemProvider.loadFileRepresentation(forTypeIdentifier: UTType.audiovisualContent.identifier) { url, err in
-     guard let url = url, err == nil else {
-         print("we Found Errors")
-         return
-     }
-     print(url, "::::")
-     let asset = AVAsset(url: url)
-     if asset.isPlayable {
-         print("Conforms")
-         dropService.setIsAllowed(to: true)
-     } else {
-         print("Does Not CONFORM")
-         dropService.setIsAllowed(to: false)
-     }
- }
- */

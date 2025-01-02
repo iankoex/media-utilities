@@ -10,12 +10,14 @@ import AVFoundation
 import SwiftUI
 
 @available(iOS 13.0, macOS 10.15, *)
-class VideoUtil: ObservableObject {
+public final class VideoUtil: ObservableObject {
     @Published var progress: Double = .zero
     @Published var videoImageFrames: [UnifiedImage] = []
     private var asset: AVAsset?
     private var timer: Timer?
     private(set) var exporter: AVAssetExportSession?
+    
+    public init() {}
 
     var videoURL: URL? {
         didSet {
@@ -33,11 +35,11 @@ class VideoUtil: ObservableObject {
         to preferredEndTime: Double,
         with preset: Quality = .presetHighestQuality,
         removeAudio: Bool = false,
-        onCompletion: @escaping (_ result: Result) -> Void)
+        onCompletion: @escaping (_ result: Result<URL, VideoUtilError>) -> Void)
     {
 //        check if the asset is an online video or a local one. If online, download it first else the exporter will fail
         guard let asset = asset else {
-            onCompletion(.error(.assetNotSet))
+            onCompletion(.failure(.assetNotSet))
             return
         }
 
@@ -57,7 +59,7 @@ class VideoUtil: ObservableObject {
         }
 
         guard let exporter = exporter else {
-            onCompletion(.error(.exporterInitFailed))
+            onCompletion(.failure(.exporterInitFailed))
             return
         }
 
@@ -84,9 +86,9 @@ class VideoUtil: ObservableObject {
         observeExporter(callback: onCompletion)
     }
 
-    func observeExporter(callback: @escaping (_ result: Result) -> Void) {
+    func observeExporter(callback: @escaping (_ result: Result<URL, VideoUtilError>) -> Void) {
         guard let exporter = exporter else {
-            callback(.error(.exporterInitFailed))
+            callback(.failure(.exporterInitFailed))
             return
         }
         timer?.invalidate()
@@ -97,10 +99,10 @@ class VideoUtil: ObservableObject {
             if exporter.status == .completed || exporter.status == .failed || exporter.status == .cancelled {
                 self.timer?.invalidate()
                 if exporter.status == .cancelled {
-                    callback(.error(.exporterCancelled))
+                    callback(.failure(.exporterCancelled))
                 }
                 if exporter.status == .failed {
-                    callback(.error(.exporterFailed))
+                    callback(.failure(.exporterFailed))
                 }
             }
         }
@@ -175,11 +177,7 @@ class VideoUtil: ObservableObject {
 }
 
 @available(iOS 13.0, macOS 10.15, *)
-extension VideoUtil {
-    enum Result {
-        case success(_ videoURL: URL)
-        case error(_ error: VideoUtilError)
-    }
+public extension VideoUtil {
 
     enum VideoUtilError: Error {
         case assetNotSet

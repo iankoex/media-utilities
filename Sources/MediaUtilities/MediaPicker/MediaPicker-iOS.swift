@@ -30,13 +30,14 @@ public extension View {
 
 @available(iOS 14.0, macOS 11, *)
 fileprivate struct MediaPickerWrapper: View {
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isLoading: Bool = false
     @State private var progress: Progress = Progress()
 
     var configuration = PHPickerConfiguration(photoLibrary: .shared())
     @Binding var isPresented: Bool
-    var allowedContentTypes: [UTType]
-    var onCompletion: (Result<[URL], Error>) -> Void
+    let allowedContentTypes: [UTType]
+    let onCompletion: (Result<[URL], Error>) -> Void
     
     init(
         isPresented: Binding<Bool>,
@@ -46,7 +47,7 @@ fileprivate struct MediaPickerWrapper: View {
     ) {
         configuration.selectionLimit = allowsMultipleSelection ? 0 : 1
         configuration.filter = PHPickerFilter.from(allowedMediaTypes)
-        configuration.preferredAssetRepresentationMode = .compatible
+        configuration.preferredAssetRepresentationMode = .automatic
 
         self._isPresented = isPresented
         self.allowedContentTypes = allowedMediaTypes.typeIdentifiers
@@ -66,28 +67,44 @@ fileprivate struct MediaPickerWrapper: View {
         .onDisappear {
             progress.cancel()
         }
-
     }
     
     var loadingView: some View {
         NavigationView {
-            ProgressView(progress)
-                .progressViewStyle(.linear)
-                .padding()
-                .navigationTitle("Importing Media...")
+            VStack(alignment: .center) {
+                ProgressView(progress)
+                    .progressViewStyle(.linear)
+                    .padding()
+                if #available(iOS 15.0, *) {
+                    cancelButton
+                        .buttonStyle(.bordered)
+                } else {
+                    cancelButton
+                }
+            }
+            .navigationTitle("Importing Media...")
         }
         .transition(.move(edge: .bottom).animation(.snappy))
+        .background(colorScheme == .dark ? Color.black : Color.white)
+    }
+    
+    var cancelButton: some View {
+        Button("Cancel") {
+            progress.cancel()
+            isPresented = false
+            onCompletion(.failure(MediaUtilitiesError.cancelled))
+        }
     }
 }
 
 @available(iOS 14.0, macOS 11, *)
 fileprivate struct MediaPickerRepresentable: UIViewControllerRepresentable {
-    var configuration: PHPickerConfiguration
+    let configuration: PHPickerConfiguration
     @Binding var isPresented: Bool
     @Binding var isLoading: Bool
     @Binding var progress: Progress
-    var allowedContentTypes: [UTType]
-    var onCompletion: (Result<[URL], Error>) -> Void
+    let allowedContentTypes: [UTType]
+    let onCompletion: (Result<[URL], Error>) -> Void
 
     func makeUIViewController(context: Context) -> PHPickerViewController {
         let controller = PHPickerViewController(configuration: configuration)
@@ -111,6 +128,12 @@ fileprivate struct MediaPickerRepresentable: UIViewControllerRepresentable {
 
         init(_ picker: MediaPickerRepresentable) {
             self.parent = picker
+        }
+        
+        func pickerDidCancel(_ picker: PHPickerViewController) {
+            error = MediaUtilitiesError.cancelled
+            parent.progress.cancel()
+            finaliseResults()
         }
         
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
@@ -171,15 +194,15 @@ fileprivate struct MediaPickerRepresentable: UIViewControllerRepresentable {
         }
 
         func finaliseResults() {
-            withAnimation {
-                parent.isLoading = false
-            }
             if pathURLs.isEmpty {
                 if let err = error {
                     parent.onCompletion(.failure(err))
                 }
             } else {
                 parent.onCompletion(.success(pathURLs))
+            }
+            withAnimation {
+                parent.isLoading = false
             }
             parent.isPresented = false
         }

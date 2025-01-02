@@ -11,7 +11,7 @@ import SwiftUI
 public struct VideoEditor: View {
     @Binding var isPresented: Bool
     @Binding var videoURL: URL?
-    var onCompletion: (Result<URL, Error>) -> Void
+    let onCompletion: (Result<URL, Error>) -> Void
     
     @StateObject private var videoUtil: VideoUtil = VideoUtil()
     @StateObject private var playerVM = PlayerViewModel()
@@ -201,7 +201,7 @@ public struct VideoEditor: View {
         }
     }
     
-    private func exportCompleted(_ result: VideoUtil.Result) {
+    private func exportCompleted(_ result: Result<URL, VideoUtil.VideoUtilError>) {
         switch result {
             case let .success(successURL):
                 exportedVideoURL = successURL
@@ -214,7 +214,7 @@ public struct VideoEditor: View {
                 playerVM.play()
                 print("Trim was a success")
                 
-            case let .error(error):
+            case let .failure(error):
                 withAnimation {
                     isExporting = false
                 }

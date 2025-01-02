@@ -31,7 +31,6 @@ final public class PlayerViewModel: ObservableObject {
     private var timeObserver: Any?
 
     deinit {
-        print("deinit")
         removeTimeObserver()
     }
 

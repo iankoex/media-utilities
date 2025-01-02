@@ -67,7 +67,6 @@ extension View {
 
 @available(iOS 14.0, macOS 11, *)
 public struct ImagePicker: ViewModifier {
-    @Environment(\.colorScheme) private var colorScheme
     @Binding var isPresented: Bool // Directly Controlls the MediaPicker
     @Binding var isGuarded: Bool
     let aspectRatio: CGFloat
@@ -86,9 +85,10 @@ public struct ImagePicker: ViewModifier {
         self.maskShape = maskShape
         self._isGuarded = isGuarded
         self.onCompletion = onCompletion
+        self._dropService = StateObject(wrappedValue: DropDelegateService(isGuarded: isGuarded.wrappedValue))
     }
     
-    @StateObject var dropService: DropDelegateService = .init()
+    @StateObject var dropService: DropDelegateService
     @State private var pickedOrDroppedImage: UnifiedImage? = nil // Dropped or Picked
 
     public func body(content: Content) -> some View {

@@ -84,9 +84,9 @@ struct ImageDropDelegate: DropDelegate {
         guard dropService.isGuarded == false else {
             return false
         }
-        guard dropService.isAllowed else {
-            return false
-        }
+//        guard dropService.isAllowed else {
+//            return false
+//        }
         dropService.anItemWasDropped = true
         guard let itemProvider = info.itemProviders(for: [.image, .url, .fileURL]).first else {
             dropCompleted(.failure(MediaUtilitiesError.lacksConformingTypeIdentifiers))
