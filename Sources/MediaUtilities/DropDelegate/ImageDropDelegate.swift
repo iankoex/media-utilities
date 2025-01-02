@@ -42,6 +42,7 @@ struct ImageDropDelegate: DropDelegate {
         }
         if itemProvider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
             itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.url.identifier) { data, _ in
+                // blocks dragging image from Safari in iOS 
                 guard let data = data, let path = NSString(data: data, encoding: 4), let url = URL(string: path as String) else {
                     return
                 }

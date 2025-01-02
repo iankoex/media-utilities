@@ -16,7 +16,7 @@ extension View {
     ///   - isPresented: a bool that directly controls the media picker
     ///   - aspectRatio: desired aspect ratio, when the mash shape is curcular this value is ignored in favour of 1
     ///   - maskShape: desired mask shape, when you choose circular the aspect ratio is automatically 1
-    ///   - isGuarded: a bool that indicates wheather the attched view can accept dropping of images
+    ///   - isGuarded: a bool that indicates whether the attched view can accept dropping of images
     ///   - onCompletion: call back with a result of type `Result<UnifiedImage, Error>`
     ///
     @inlinable public func imagePicker(
@@ -43,7 +43,7 @@ extension View {
     ///   - isPresented: a bool that directly controls the media picker
     ///   - aspectRatio: desired aspect ratio, when the mash shape is curcular this value is ignored in favour of 1
     ///   - maskShape: desired mask shape, when you choose circular the aspect ratio is automatically 1
-    ///   - isGuarded: a bool that indicates wheather the attched view can accept dropping of images
+    ///   - isGuarded: a bool that indicates whether the attched view can accept dropping of images
     ///   - onCompletion: call back with a result of type `Result<UnifiedImage, Error>`
     ///
     @inlinable public func imagePicker(
