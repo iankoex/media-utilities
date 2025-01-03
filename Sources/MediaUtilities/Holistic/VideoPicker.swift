@@ -10,12 +10,12 @@ import SwiftUI
 @available(iOS 14.0, macOS 11, *)
 extension View {
     
-    /// an holictic video picker that allows for picking or dropping of videos or url with videos to the attached view
+    /// a holistic video picker that allows for picking or dropping of videos or url with videos to the attached view
     /// and editing of the video before retuning the url in the local file sytem.
     /// internet urls will be downloaded before editing the video.
     /// - Parameters:
     ///   - isPresented: a bool that directly controls the media picker
-    ///   - isGuarded: a bool that indicates whether the attched view can accept dropping of url or video
+    ///   - isGuarded: a bool that indicates whether the attached view can accept dropping of url or video
     ///   - onCompletion: call back with a result of type `Result<URL, Error>`, the url is a local file url
     @inlinable public func videoPicker(
         _ isPresented: Binding<Bool>,
@@ -31,12 +31,12 @@ extension View {
         )
     }
     
-    /// an holictic video picker that allows for picking or dropping of videos or url with videos to the attached view
+    /// a holistic video picker that allows for picking or dropping of videos or url with videos to the attached view
     /// and editing of the video before retuning the url in the local file sytem.
     /// internet urls will be downloaded before editing the video.
     /// - Parameters:
     ///   - isPresented: a bool that directly controls the media picker
-    ///   - isGuarded: a bool that indicates whether the attched view can accept dropping of url or video
+    ///   - isGuarded: a bool that indicates whether the attached view can accept dropping of url or video
     ///   - onCompletion: call back with a result of type `Result<URL, Error>`, the url is a local file url
     @inlinable public func videoPicker(
         _ isPresented: Binding<Bool>,

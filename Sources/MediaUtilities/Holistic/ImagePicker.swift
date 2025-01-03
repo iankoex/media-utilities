@@ -10,13 +10,13 @@ import SwiftUI
 
 @available(iOS 14.0, macOS 11, *)
 extension View {
-    /// an holictic image picker that allows for picking or dropping image to the attached view and editing the image before retuning the final image.
+    /// a holistic image picker that allows for picking or dropping image to the attached view and editing the image before retuning the final image.
     /// the image editor uses gestures, keep this in mind when attaching this modifier to a sheet, a scrollview or any view with gestures enabled
     /// - Parameters:
     ///   - isPresented: a bool that directly controls the media picker
     ///   - aspectRatio: desired aspect ratio, when the mash shape is curcular this value is ignored in favour of 1
     ///   - maskShape: desired mask shape, when you choose circular the aspect ratio is automatically 1
-    ///   - isGuarded: a bool that indicates whether the attched view can accept dropping of images
+    ///   - isGuarded: a bool that indicates whether the attached view can accept dropping of images
     ///   - onCompletion: call back with a result of type `Result<UnifiedImage, Error>`
     ///
     @inlinable public func imagePicker(
@@ -37,13 +37,13 @@ extension View {
         )
     }
     
-    /// an holictic image picker that allows for picking or dropping image to the attached view and editing the image before retuning the final image.
+    /// a holistic image picker that allows for picking or dropping image to the attached view and editing the image before retuning the final image.
     /// the image editor uses gestures, keep this in mind when attaching this modifier to a sheet, a scrollview or any view with gestures enabled
     /// - Parameters:
     ///   - isPresented: a bool that directly controls the media picker
     ///   - aspectRatio: desired aspect ratio, when the mash shape is curcular this value is ignored in favour of 1
     ///   - maskShape: desired mask shape, when you choose circular the aspect ratio is automatically 1
-    ///   - isGuarded: a bool that indicates whether the attched view can accept dropping of images
+    ///   - isGuarded: a bool that indicates whether the attached view can accept dropping of images
     ///   - onCompletion: call back with a result of type `Result<UnifiedImage, Error>`
     ///
     @inlinable public func imagePicker(

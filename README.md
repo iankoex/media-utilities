@@ -33,13 +33,13 @@ Feel free to add your implementations and submit a pr.
 
 ```swift
 
-/// an holictic image picker that allows for picking or dropping image to the attached view and editing the image before retuning the final image.
+/// a holistic image picker that allows for picking or dropping image to the attached view and editing the image before retuning the final image.
 /// the image editor uses gestures, keep this in mind when attaching this modifier to a sheet, a scrollview or any view with gestures enabled
 /// - Parameters:
 ///   - isPresented: a bool that directly controls the media picker
 ///   - aspectRatio: desired aspect ratio, when the mash shape is curcular this value is ignored in favour of 1
 ///   - maskShape: desired mask shape, when you choose circular the aspect ratio is automatically 1
-///   - isGuarded: a bool that indicates whether the attched view can accept dropping of images
+///   - isGuarded: a bool that indicates whether the attached view can accept dropping of images
 ///   - onCompletion: call back with a result of type `Result<UnifiedImage, Error>`
 ///
 @inlinable public func imagePicker(
@@ -58,12 +58,12 @@ Feel free to add your implementations and submit a pr.
 ```swift
 
 
-/// an holictic video picker that allows for picking or dropping of videos or url with videos to the attached view
+/// a holistic video picker that allows for picking or dropping of videos or url with videos to the attached view
 /// and editing of the video before retuning the url in the local file sytem.
 /// internet urls will be downloaded before editing the video.
 /// - Parameters:
 ///   - isPresented: a bool that directly controls the media picker
-///   - isGuarded: a bool that indicates whether the attched view can accept dropping of url or video
+///   - isGuarded: a bool that indicates whether the attached view can accept dropping of url or video
 ///   - onCompletion: call back with a result of type `Result<URL, Error>`, the url is a local file url
 @inlinable public func videoPicker(
     _ isPresented: Binding<Bool>,
