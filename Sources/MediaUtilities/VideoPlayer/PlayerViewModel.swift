@@ -155,7 +155,7 @@ final public class PlayerViewModel: ObservableObject {
             self.currentTime = time.seconds
         }
         if endPlayingAt != .zero && currentTime >= endPlayingAt {
-            print("endPlayingAtReached currentTime >= endPlayingAt", startPlayingAt, currentTime, endPlayingAt, duration)
+//            print("endPlayingAtReached currentTime >= endPlayingAt", startPlayingAt, currentTime, endPlayingAt, duration)
             endPlayingAtReached()
         }
     }

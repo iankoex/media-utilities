@@ -212,7 +212,6 @@ public struct VideoEditor: View {
                 }
                 playerVM.startPlayingAt = .zero
                 playerVM.play()
-                print("Trim was a success")
                 
             case let .failure(error):
                 withAnimation {

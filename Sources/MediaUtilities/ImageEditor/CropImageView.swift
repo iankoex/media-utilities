@@ -318,7 +318,7 @@ public struct CropImageView: View {
         
         Task {
             do {
-                let image = try await MediaUtilities.cropImage(inputImage, to: rect, using: maskShape)
+                let image = try MediaUtilities.cropImage(inputImage, to: rect, using: maskShape)
                 onCompletion(.success(image))
             } catch {
                 onCompletion(.failure(error))

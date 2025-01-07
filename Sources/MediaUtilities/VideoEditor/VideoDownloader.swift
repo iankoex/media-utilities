@@ -81,7 +81,6 @@ extension VideoDownloader: URLSessionDownloadDelegate {
         } catch {
             print(error.localizedDescription)
         }
-        print(localURL, "VideoDownloader Local URLL")
         DispatchQueue.main.async {
             self.finalURL = localURL
         }
