@@ -96,7 +96,7 @@ public struct CameraCaptureView: View {
         ZStack {
             cameraService.previewImage?
                 .resizable()
-//                .aspectRatio(contentMode: .fit)
+            //                .aspectRatio(contentMode: .fit)
 
             VStack {
                 topControls
@@ -121,9 +121,15 @@ public struct CameraCaptureView: View {
         HStack {
             closeButton
             Spacer()
-            modeSelector
-            Spacer()
             flashButton
+        }
+        .overlay {
+            if cameraService.movieFileOutput?.isRecording ?? false {
+                RecordingTimeView(time: cameraService.movieFileOutput?.recordedDuration.seconds ?? 0)
+            } else {
+                modeSelector
+                    .frame(maxWidth: 100)
+            }
         }
     }
 
@@ -144,52 +150,38 @@ public struct CameraCaptureView: View {
     // MARK: - Bottom Controls
 
     private var bottomControls: some View {
-        HStack(spacing: 50) {
+        HStack {
+            Spacer(minLength: 44)
             cameraSwitchButton
+        }
+        .overlay {
             captureButton
-            Spacer()
-                .frame(width: 44)
         }
     }
 
     // MARK: - Mode Selector
 
     private var modeSelector: some View {
-        HStack(spacing: 20) {
+        Picker("Capture Mode", selection: $captureMode) {
             ForEach(CaptureMode.allCases, id: \.self) { mode in
-                Button(
-                    action: {
-                        withAnimation {
-                            captureMode = mode
-                        }
-                    },
-                    label: {
-                        Image(systemName: mode.systemImage)
-                            .foregroundColor(captureMode == mode ? .blue : .white)
-                            .padding()
-                            .grayBackgroundCircle()
-                            .overlay(
-                                Circle()
-                                    .stroke(captureMode == mode ? .blue : .clear, lineWidth: 2)
-                            )
-                    }
-                )
+                Label(mode.rawValue, systemImage: mode.systemImage)
+                    .labelStyle(.iconOnly)
+                    .tag(mode)
             }
         }
+        .pickerStyle(.segmented)
     }
 
     // MARK: - Flash Button
 
     private var flashButton: some View {
-        Button(action: {
-            _ = cameraService.toggleFlashMode()
-        }) {
+        Button(action: cameraService.toggleFlashMode) {
             Image(systemName: flashIcon)
                 .foregroundColor(flashIconColor)
                 .padding()
                 .grayBackgroundCircle()
         }
-        .disabled(!cameraService.getCameraInfo().isAvailable)
+        .disabled(!cameraService.isCameraAvailable)
     }
 
     private var flashIcon: String {
@@ -239,7 +231,7 @@ public struct CameraCaptureView: View {
                 .padding()
                 .grayBackgroundCircle()
         }
-        .disabled(!cameraService.getCameraInfo().isAvailable)
+        .disabled(!cameraService.isCameraAvailable)
     }
 
     // MARK: - Capture Button
@@ -271,7 +263,7 @@ public struct CameraCaptureView: View {
                 }
             }
         }
-        .disabled(cameraService.isCapturingPhoto || !cameraService.getCameraInfo().isAvailable)
+        .disabled(cameraService.isCapturingPhoto || !cameraService.isCameraAvailable)
     }
 
     // MARK: - Actions

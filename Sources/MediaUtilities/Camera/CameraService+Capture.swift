@@ -200,7 +200,6 @@ extension CameraService {
 
         let fileName = UUID().uuidString
         let filePath = directoryPath.appendingPathComponent(fileName).appendingPathExtension("mp4")
-
         movieFileOutput.startRecording(to: filePath, recordingDelegate: self)
         print("Video recording started to: \(filePath.path)")
     }
@@ -246,24 +245,18 @@ extension CameraService {
     ///
     /// - Returns: `true` if flash mode was successfully changed, `false` if flash is not available.
     /// - Note: Flash is only available on iOS devices that support it.
-    public func toggleFlashMode() -> Bool {
+    public func toggleFlashMode() {
         guard isFlashAvailable else {
-            print("Flash not available on current device")
-            return false
+            return
         }
 
         if flashMode == .off {
             flashMode = .on
-            print("Flash turned on")
         } else if flashMode == .on {
             flashMode = .auto
-            print("Flash set to auto")
         } else {
             flashMode = .off
-            print("Flash turned off")
         }
-        return true
-
     }
 }
 

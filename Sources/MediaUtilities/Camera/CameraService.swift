@@ -34,7 +34,7 @@ import SwiftUI
 /// ```swift
 /// let cameraService = CameraService()
 /// await cameraService.initializeCamera()
-/// 
+///
 /// let result = await cameraService.capturePhotoWithCompletion()
 /// switch result {
 /// case .success(let url):
@@ -42,7 +42,7 @@ import SwiftUI
 /// case .failure(let error):
 ///     print("Capture failed: \(error)")
 /// }
-/// 
+///
 /// // Monitor live preview
 /// for await ciImage in cameraService.previewStream {
 ///     // Process preview frames
@@ -82,13 +82,13 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
     /// Changes to this property are automatically reflected in the UI.
     /// - Note: Flash is only available on iOS devices that support it.
     @Published public var flashMode: AVCaptureDevice.FlashMode = .off
-    
+
     /// Indicates whether a photo capture operation is currently in progress.
     ///
     /// This property is automatically updated during photo capture operations
     /// and can be used to show loading states or prevent multiple simultaneous captures.
     @Published public var isCapturingPhoto: Bool = false
-    
+
     /// Controls whether the camera preview is currently paused.
     ///
     /// When set to `true`, the preview stream stops delivering new frames
@@ -204,7 +204,7 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
     /// The current authorization status for camera access.
     ///
     /// This property returns the current permission status for camera access
-    /// without triggering a permission request. Use `requestCameraAccess()` 
+    /// without triggering a permission request. Use `requestCameraAccess()`
     /// to prompt the user for permission if needed.
     public var authorizationStatus: AVAuthorizationStatus {
         AVCaptureDevice.authorizationStatus(for: .video)
@@ -304,9 +304,7 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
     }
 
     func handleCameraPreviews() async {
-        let imageStream =
-            previewStream
-            .map { $0.image }
+        let imageStream = previewStream.map { $0.image }
 
         for await image in imageStream {
             Task { @MainActor in
@@ -414,7 +412,7 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
         self.movieFileOutput = movieFileOutput
 
         if #available(macOS 13.0, *) {
-            photoOutput.maxPhotoQualityPrioritization = .quality
+            photoOutput.maxPhotoQualityPrioritization = .balanced
         } else {
             // Fallback on earlier versions
         }
