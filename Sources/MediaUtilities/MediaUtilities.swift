@@ -12,16 +12,68 @@ import UIKit
 import AppKit
 #endif
 
+/// A collection of static utility functions for image manipulation and processing.
+///
+/// `MediaUtilities` provides core image processing functionality including cropping,
+/// rotation, and straightening operations. All functions are static and work with
+/// the unified `UnifiedImage` type for cross-platform compatibility.
+///
+/// ## Usage
+///
+/// ```swift
+/// // Crop an image to a specific size
+/// let croppedImage = try MediaUtilities.cropImage(
+///     originalImage,
+///     to: CGRect(x: 0, y: 0, width: 200, height: 200),
+///     using: .rectangular
+/// )
+///
+/// // Rotate an image by 90 degrees
+/// let rotatedImage = try MediaUtilities.rotateImage(
+///     originalImage,
+///     angle: Measurement(value: 90, unit: .degrees)
+/// )
+/// ```
+///
+/// ## Platform Availability
+///
+/// - iOS 13.0+
+/// - macOS 10.15+
+///
 public struct MediaUtilities {
     
-    /// Crops Image to a specified size using a  specified mask shape
+    /// Crops an image to a specified rectangular region with optional circular masking.
+    ///
+    /// This function crops the input image to the specified rectangular region and optionally
+    /// applies a circular mask to create a circular image. The function preserves image
+    /// orientation and handles platform-specific image processing.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// // Crop to a rectangular region
+    /// let cropped = try MediaUtilities.cropImage(
+    ///     image,
+    ///     to: CGRect(x: 100, y: 100, width: 200, height: 200),
+    ///     using: .rectangular
+    /// )
+    ///
+    /// // Crop to a circular region
+    /// let circular = try MediaUtilities.cropImage(
+    ///     image,
+    ///     to: CGRect(x: 100, y: 100, width: 200, height: 200),
+    ///     using: .circular
+    /// )
+    /// ```
+    ///
     /// - Parameters:
-    ///   - image: image to crop
-    ///   - size: desired image size
-    ///   - maskShape: desired image shape, circular will crop the image to a circle, rectangular does nothing
-    /// - Returns: a cropped `UnifiedImage`
-    /// - Throws: `MediaUtilitiesError.cropImageError` depending on the error
-    static func cropImage(_ image: UnifiedImage, to size: CGRect, using maskShape: MaskShape) throws -> UnifiedImage {
+    ///   - image: The image to crop
+    ///   - size: The rectangular region to crop to, specified in image coordinates
+    ///   - maskShape: The shape to apply after cropping. `.circular` creates a circular image,
+    ///     `.rectangular` leaves the image as a rectangle
+    /// - Returns: A new `UnifiedImage` containing the cropped result
+    /// - Throws: `MediaUtilitiesError.cropImageError` if cropping fails due to invalid input or processing errors
+    public static func cropImage(_ image: UnifiedImage, to size: CGRect, using maskShape: MaskShape) throws -> UnifiedImage {
         guard let image = image.withCorrectOrientation else {
             throw MediaUtilitiesError.cropImageError("couldn't get correct orientation")
         }
@@ -42,15 +94,37 @@ public struct MediaUtilities {
     }
     
     
-    /// rotates the specified image by the specified angle,
-    /// use this for 90 and 180 degree rotations,
-    /// any other angle will result to a distorted image when a couple times
+    /// Rotates an image by a specified angle.
+    ///
+    /// This function rotates the input image by the specified angle using Core Image
+    /// transformations. It's optimized for 90-degree and 180-degree rotations, but
+    /// can handle arbitrary angles. For non-orthogonal rotations, repeated applications
+    /// may result in image distortion due to cumulative transformation errors.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// // Rotate by 90 degrees clockwise
+    /// let rotated = try MediaUtilities.rotateImage(
+    ///     image,
+    ///     angle: Measurement(value: 90, unit: .degrees)
+    /// )
+    ///
+    /// // Rotate by 180 degrees
+    /// let upsideDown = try MediaUtilities.rotateImage(
+    ///     image,
+    ///     angle: Measurement(value: 180, unit: .degrees)
+    /// )
+    /// ```
+    ///
     /// - Parameters:
-    ///   - image: image to be rotated
-    ///   - angle: desired angle (90, -90, 180)
-    /// - Returns: a rotated `UnifiedImage`
-    /// - Throws: `MediaUtilitiesError.rotateImageError` depending on the error
-    static func rotateImage(_ image: UnifiedImage, angle: Measurement<UnitAngle>) throws -> UnifiedImage {
+    ///   - image: The image to rotate
+    ///   - angle: The rotation angle as a `Measurement<UnitAngle>`. Positive values rotate clockwise
+    /// - Returns: A new `UnifiedImage` containing the rotated result
+    /// - Throws: `MediaUtilitiesError.rotateImageError` if rotation fails due to invalid input or processing errors
+    ///
+    /// - Note: For best results, use 90-degree increments. Arbitrary angles may accumulate distortion with repeated rotations.
+    public static func rotateImage(_ image: UnifiedImage, angle: Measurement<UnitAngle>) throws -> UnifiedImage {
         guard let image = image.withCorrectOrientation else {
             throw MediaUtilitiesError.rotateImageError("couldn't get correct orientation")
         }
@@ -76,15 +150,31 @@ public struct MediaUtilities {
         return UnifiedImage(cgImage: outputCGImage)
     }
     
-    /// WORK IN PROGRESS
-    /// straighten the specified image by the specified angle,
-    /// remember that if you use 90 degrees here that the resulting image will still have the same dimentions as input image
+    /// Straightens an image by correcting perspective distortion.
+    ///
+    /// This function applies a straightening filter to correct perspective distortion
+    /// in images. Unlike rotation, straightening adjusts the image content to
+    /// compensate for camera tilt while maintaining the original dimensions.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// // Straighten a slightly tilted image
+    /// let straightened = try MediaUtilities.straightenImage(
+    ///     tiltedImage,
+    ///     angle: Measurement(value: 5, unit: .degrees)
+    /// )
+    /// ```
+    ///
     /// - Parameters:
-    ///   - image: image to be straightened
-    ///   - angle: desired angle
-    /// - Returns: a straightened `UnifiedImage`
-    /// - Throws: `MediaUtilitiesError.straightenImageError` depending on the error
-    static func straightenImage(_ image: UnifiedImage, angle: Measurement<UnitAngle>) throws -> UnifiedImage {
+    ///   - image: The image to straighten
+    ///   - angle: The correction angle as a `Measurement<UnitAngle>`. Small angles (typically < 10°) work best
+    /// - Returns: A new `UnifiedImage` with perspective correction applied
+    /// - Throws: `MediaUtilitiesError.straightenImageError` if straightening fails due to invalid input or processing errors
+    ///
+    /// - Note: This function uses Core Image's CIStraightenFilter. Results may vary based on image content and angle.
+    /// - Warning: This API is currently in development and may change in future versions.
+    public static func straightenImage(_ image: UnifiedImage, angle: Measurement<UnitAngle>) throws -> UnifiedImage {
         guard let image = image.withCorrectOrientation else {
             throw MediaUtilitiesError.straightenImageError("couldn't get correct orientation")
         }

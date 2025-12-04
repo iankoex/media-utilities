@@ -7,6 +7,7 @@ This package allows you to:
 
 - Import Images and Videos
 - Edit Images and Videos
+- Capture Photos and Videos with Camera
 
 # Installation
 
@@ -73,6 +74,89 @@ Feel free to add your implementations and submit a pr.
 
 ```
 
+### Camera
+
+Provides comprehensive camera functionality for capturing photos and videos with advanced controls.
+
+#### Camera Capture View
+
+A complete SwiftUI camera interface with live preview, capture controls, and mode switching.
+
+```swift
+import SwiftUI
+import MediaUtilities
+
+struct CameraView: View {
+    @State private var showCamera = false
+
+    var body: some View {
+        VStack {
+            Button("Open Camera") {
+                showCamera = true
+            }
+        }
+        .cameraCapture(isPresented: $showCamera) { result in
+            switch result {
+            case .success(let url):
+                print("Media captured: \(url)")
+            case .failure(let error):
+                print("Camera error: \(error)")
+            }
+        }
+    }
+}
+```
+
+#### Camera Service
+
+For advanced camera control and custom implementations.
+
+```swift
+import MediaUtilities
+
+class CameraManager {
+    private let cameraService = CameraService()
+
+    func setupCamera() async {
+        // Initialize camera
+        let result = await cameraService.initializeCamera()
+        switch result {
+        case .success:
+            print("Camera ready")
+        case .failure(let error):
+            print("Camera setup failed: \(error)")
+        }
+    }
+
+    func capturePhoto() async {
+        let result = await cameraService.capturePhotoWithCompletion()
+        switch result {
+        case .success(let url):
+            print("Photo saved to: \(url)")
+        case .failure(let error):
+            print("Photo capture failed: \(error)")
+        }
+    }
+
+    func toggleFlash() {
+        let success = cameraService.toggleFlashMode()
+        if success {
+            print("Flash mode: \(cameraService.flashMode)")
+        }
+    }
+}
+```
+
+#### Camera Features
+
+- **Live Preview**: Real-time camera preview with pause/resume controls
+- **Photo/Video Capture**: Switch between photo and video recording modes
+- **Flash Control**: Automatic flash mode cycling (off/auto/on)
+- **Camera Switching**: Toggle between front and back cameras
+- **Permission Handling**: Automatic camera access request and status checking
+- **Error Handling**: Comprehensive error reporting with localized messages
+- **Cross-Platform**: Works on both iOS and macOS with platform-specific optimizations
+
 What this allows you to do is enable drag and drop to the view,edit the asset then retun the edited asset.
 The `isPresented` directly controls the PhotosPicker in iOS and finder window in macOS.
 
@@ -82,6 +166,7 @@ The `isPresented` directly controls the PhotosPicker in iOS and finder window in
 - [ ] Custom Audio to Video
 - [ ] Drawing on Image/Video
 - [x] Drag and Drop Delegates
+- [x] Camera Capture (Photo/Video)
 
 # SDKs
 
