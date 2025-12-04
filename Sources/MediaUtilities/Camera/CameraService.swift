@@ -10,6 +10,56 @@ import CoreImage
 import Foundation
 import SwiftUI
 
+/// A comprehensive camera management service that provides unified access to device cameras
+/// across iOS and macOS platforms with modern Swift concurrency support.
+///
+/// The `CameraService` handles all camera operations including:
+/// - Device discovery and configuration management
+/// - Live preview streaming with async/await patterns
+/// - Photo and video capture with proper error handling
+/// - Flash mode control and camera switching
+/// - Permission management and status tracking
+/// - Thread-safe operations using dedicated dispatch queues
+///
+/// ## Architecture
+///
+/// The service uses a modular architecture with separate extensions for different concerns:
+/// - **Capture Operations**: Photo/video recording and session management
+/// - **Delegate Handling**: AVFoundation delegate implementations
+/// - **High-Level Intents**: User-friendly async APIs with Result types
+/// - **Permission Management**: Camera access request handling
+///
+/// ## Usage
+///
+/// ```swift
+/// let cameraService = CameraService()
+/// await cameraService.initializeCamera()
+/// 
+/// let result = await cameraService.capturePhotoWithCompletion()
+/// switch result {
+/// case .success(let url):
+///     print("Photo saved to: \(url)")
+/// case .failure(let error):
+///     print("Capture failed: \(error)")
+/// }
+/// 
+/// // Monitor live preview
+/// for await ciImage in cameraService.previewStream {
+///     // Process preview frames
+/// }
+/// ```
+///
+/// ## Thread Safety
+///
+/// All camera operations are performed on a dedicated `sessionQueue` to ensure thread safety.
+/// UI updates should be performed on the main thread using `@MainActor` or `DispatchQueue.main`.
+///
+/// ## Platform Availability
+///
+/// - iOS 13.0+
+/// - macOS 10.15+
+/// - Some features (like flash) are iOS-only
+///
 @available(iOS 13.0, macOS 10.15, *)
 public final class CameraService: NSObject, ObservableObject, Sendable {
 
@@ -26,10 +76,25 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
 
     // MARK: - Public Observable Properties
 
-    public var authorizationStatus: AVAuthorizationStatus = .notDetermined
-    public var isCameraAvailable: Bool = false
-    public var isLoading: Bool = false
-    public var isPreviewPaused = false
+    /// The current flash mode setting for the camera.
+    ///
+    /// This property controls the flash behavior when capturing photos.
+    /// Changes to this property are automatically reflected in the UI.
+    /// - Note: Flash is only available on iOS devices that support it.
+    @Published public var flashMode: AVCaptureDevice.FlashMode = .off
+    
+    /// Indicates whether a photo capture operation is currently in progress.
+    ///
+    /// This property is automatically updated during photo capture operations
+    /// and can be used to show loading states or prevent multiple simultaneous captures.
+    @Published public var isCapturingPhoto: Bool = false
+    
+    /// Controls whether the camera preview is currently paused.
+    ///
+    /// When set to `true`, the preview stream stops delivering new frames
+    /// but the capture session remains active. This can be useful for
+    /// performance optimization or when the camera view is not visible.
+    @Published public var isPreviewPaused = false
 
     // MARK: - Device Properties
 
@@ -98,24 +163,86 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
 
     // MARK: - Public Computed Properties
 
+    /// A Boolean value indicating whether the camera capture session is currently running.
+    ///
+    /// When `true`, the camera is actively capturing and providing preview frames.
+    /// When `false`, the session is stopped and no camera operations are active.
     public var isRunning: Bool {
         captureSession.isRunning
     }
 
+    /// A Boolean value indicating whether the front-facing camera is currently active.
+    ///
+    /// Returns `true` if the current capture device is positioned on the front of the device,
+    /// suitable for selfies and video calls. Returns `false` if back camera is active
+    /// or no camera is selected.
     public var isUsingFrontCaptureDevice: Bool {
         guard let captureDevice = captureDevice else { return false }
         return frontCaptureDevices.contains(captureDevice)
     }
 
+    /// A Boolean value indicating whether the back-facing camera is currently active.
+    ///
+    /// Returns `true` if the current capture device is positioned on the back of the device,
+    /// typically used for standard photography and video recording. Returns `false`
+    /// if front camera is active or no camera is selected.
     public var isUsingBackCaptureDevice: Bool {
         guard let captureDevice = captureDevice else { return false }
         return backCaptureDevices.contains(captureDevice)
+    }
+
+    /// A Boolean value indicating whether the current camera device supports flash.
+    ///
+    /// Returns `true` if the currently selected camera device has flash capabilities.
+    /// Flash is typically available on back cameras but not on front cameras.
+    /// This property updates automatically when switching between cameras.
+    public var isFlashAvailable: Bool {
+        guard let captureDevice = captureDevice else { return false }
+        return captureDevice.isFlashAvailable
+    }
+
+    /// The current authorization status for camera access.
+    ///
+    /// This property returns the current permission status for camera access
+    /// without triggering a permission request. Use `requestCameraAccess()` 
+    /// to prompt the user for permission if needed.
+    public var authorizationStatus: AVAuthorizationStatus {
+        AVCaptureDevice.authorizationStatus(for: .video)
+    }
+
+    /// A Boolean value indicating whether any camera devices are available on the current device.
+    ///
+    /// Returns `true` if the device has at least one available camera that can be used
+    /// for capture operations. Returns `false` if no cameras are detected or all cameras
+    /// are unavailable (disconnected or suspended).
+    /// A Boolean value indicating whether any camera devices are available and authorized.
+    ///
+    /// Returns `true` if the device has at least one available camera that can be used
+    /// for capture operations AND camera access has been authorized by the user.
+    /// Returns `false` if no cameras are detected, all cameras are unavailable,
+    /// or camera access has not been granted.
+    public var isCameraAvailable: Bool {
+        authorizationStatus == .authorized && !availableCaptureDevices.isEmpty
     }
 
     // MARK: - Async Streams
 
     var addToPhotoStream: ((AVCapturePhoto) -> Void)?
 
+    /// An async stream that delivers captured photos as they become available.
+    ///
+    /// This stream provides `AVCapturePhoto` objects as they are captured by the camera.
+    /// Use this stream for real-time photo processing or to build custom photo handling logic.
+    /// The stream continues until the camera service is deallocated.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// for await photo in cameraService.photoStream {
+    ///     // Process captured photo
+    ///     print("Photo captured: \(photo)")
+    /// }
+    /// ```
     var photoStream: AsyncStream<AVCapturePhoto> {
         AsyncStream { continuation in
             addToPhotoStream = { photo in
@@ -126,6 +253,20 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
 
     var addToMovieFileStream: ((URL) -> Void)?
 
+    /// An async stream that delivers URLs of completed video recordings.
+    ///
+    /// This stream provides local file URLs for videos as they finish recording.
+    /// Each URL points to a video file stored in the device's documents directory.
+    /// The stream continues until the camera service is deallocated.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// for await videoURL in cameraService.movieFileStream {
+    ///     // Handle completed video recording
+    ///     print("Video saved to: \(videoURL)")
+    /// }
+    /// ```
     public var movieFileStream: AsyncStream<URL> {
         AsyncStream { continuation in
             addToMovieFileStream = { fileUrl in
@@ -136,6 +277,22 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
 
     var addToPreviewStream: ((CIImage) -> Void)?
 
+    /// An async stream that delivers live camera preview frames.
+    ///
+    /// This stream provides `CIImage` objects representing the current camera preview
+    /// at approximately 30 FPS. Frames are only delivered when `isPreviewPaused` is `false`.
+    /// Use this stream for custom preview processing or computer vision tasks.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// for await ciImage in cameraService.previewStream {
+    ///     // Process preview frame
+    ///     let uiImage = UIImage(ciImage: ciImage)
+    /// }
+    /// ```
+    ///
+    /// - Note: Preview frames are delivered on a background queue. Update UI on main thread.
     public var previewStream: AsyncStream<CIImage> {
         AsyncStream { continuation in
             addToPreviewStream = { ciImage in
@@ -146,7 +303,6 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
         }
     }
 
-    // for preview camera output
     func handleCameraPreviews() async {
         let imageStream =
             previewStream
@@ -167,18 +323,9 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
         captureSession.sessionPreset = .photo
         sessionQueue = DispatchQueue(label: "session queue")
         captureDevice = availableCaptureDevices.first ?? AVCaptureDevice.default(for: .video)
-
-        // Check initial camera availability
-        checkCameraAvailability()
-
-        print("CameraService initialized")
     }
 
     // MARK: - Private Helper Methods
-
-    private func checkCameraAvailability() {
-        isCameraAvailable = !availableCaptureDevices.isEmpty
-    }
 
     private func deviceInputFor(device: AVCaptureDevice?) -> AVCaptureDeviceInput? {
         guard let validDevice = device else { return nil }
@@ -266,7 +413,7 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
         self.videoOutput = videoOutput
         self.movieFileOutput = movieFileOutput
 
-        if #available(iOS 13.0, macOS 13.0, *) {
+        if #available(macOS 13.0, *) {
             photoOutput.maxPhotoQualityPrioritization = .quality
         } else {
             // Fallback on earlier versions
@@ -281,7 +428,7 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
     }
 }
 
-// MARK: - Rotation Angle (from provided code)
+// MARK: - Rotation Angle
 
 enum RotationAngle: CGFloat {
     case portrait = 90

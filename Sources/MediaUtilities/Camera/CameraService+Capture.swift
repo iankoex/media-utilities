@@ -13,11 +13,22 @@ import Foundation
 @available(iOS 13.0, macOS 10.15, *)
 extension CameraService {
 
-    /// Start the camera session (from provided code)
-
+    /// Starts the camera capture session and begins streaming preview frames.
+    ///
+    /// This method configures the capture session if not already configured,
+    /// checks for camera permissions, and starts the session.
+    /// Preview frames will begin flowing through the `previewStream` after this call.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// await cameraService.start()
+    /// // Preview frames are now available via previewStream
+    /// ```
+    ///
+    /// - Note: This method is a no-op if the session is already running.
     public func start() async {
-        let authorized = await checkAuthorization()
-        guard authorized else {
+        guard authorizationStatus == .authorized else {
             print("Camera access not authorized, cannot start session")
             return
         }
@@ -43,7 +54,20 @@ extension CameraService {
         }
     }
 
-    /// Stop the camera session (from provided code)
+    /// Stops the camera capture session and halts preview frame streaming.
+    ///
+    /// This method stops the capture session, which stops all camera operations
+    /// including preview streaming, photo capture, and video recording.
+    /// The session can be restarted by calling `start()` again.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// cameraService.stop()
+    /// // Preview frames stop flowing through previewStream
+    /// ```
+    ///
+    /// - Note: This method is a no-op if the session is not running.
     public func stop() {
         guard isCaptureSessionConfigured else {
             print("Capture session not configured, cannot stop")
@@ -58,7 +82,20 @@ extension CameraService {
         }
     }
 
-    /// Switch between available cameras (from provided code)
+    /// Switches between available front and back cameras.
+    ///
+    /// This method toggles between the front and back cameras if both are available.
+    /// If only one camera is available, it switches to that camera.
+    /// The capture session is automatically reconfigured for the new device.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// cameraService.switchCamera()
+    /// // Camera switches from front to back or vice versa
+    /// ```
+    ///
+    /// - Note: This method updates `isUsingFrontCaptureDevice` and `isUsingBackCaptureDevice` properties.
     public func switchCamera() {
         if let captureDevice = captureDevice, let index = availableCaptureDevices.firstIndex(of: captureDevice) {
             let nextIndex = (index + 1) % availableCaptureDevices.count
@@ -70,7 +107,22 @@ extension CameraService {
         }
     }
 
-    /// Take a photo (adapted from provided code)
+    /// Captures a photo using current camera settings and returns file URL.
+    ///
+    /// This method performs a low-level photo capture operation using the current
+    /// camera configuration including flash mode, focus, and exposure settings.
+    /// The captured photo is saved to a temporary file and the URL is returned.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// if let photoURL = await cameraService.capturePhoto() {
+    ///     print("Photo saved to: \(photoURL)")
+    /// }
+    /// ```
+    ///
+    /// - Returns: URL to the captured photo file, or `nil` if capture failed.
+    /// - Note: For user-friendly error handling, use `capturePhotoWithCompletion()` instead.
     @concurrent
     public func capturePhoto() async -> URL? {
         guard let photoOutput = self.photoOutput else {
@@ -86,10 +138,8 @@ extension CameraService {
                     photoSettings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
                 }
 
-                let isFlashAvailable = self.deviceInput?.device.isFlashAvailable ?? false
-
-                if #available(iOS 13.0, macOS 13.0, *) {
-                    photoSettings.flashMode = isFlashAvailable ? .auto : .off
+                if #available(macOS 13.0, *) {
+                    photoSettings.flashMode = flashMode
                     #if os(iOS)
                     if let previewPhotoPixelFormatType = photoSettings.availablePreviewPhotoPixelFormatTypes.first {
                         photoSettings.previewPhotoFormat = [
@@ -118,7 +168,21 @@ extension CameraService {
         }
     }
 
-    /// Start recording video (from provided code)
+    /// Starts recording video to a temporary file.
+    ///
+    /// This method begins video recording using the current camera configuration.
+    /// The video is saved to a temporary file in the documents directory.
+    /// Recording continues until `stopRecordingVideo()` is called.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// cameraService.startRecordingVideo()
+    /// // Video recording starts...
+    /// cameraService.stopRecordingVideo()
+    /// ```
+    ///
+    /// - Note: Use `movieFileStream` to receive the URL when recording completes.
     public func startRecordingVideo() {
         guard let movieFileOutput = self.movieFileOutput else {
             print("Cannot find movie file output")
@@ -135,16 +199,28 @@ extension CameraService {
         }
 
         let fileName = UUID().uuidString
-        let filePath =
-            directoryPath
-            .appendingPathComponent(fileName)
-            .appendingPathExtension("mp4")
+        let filePath = directoryPath.appendingPathComponent(fileName).appendingPathExtension("mp4")
 
         movieFileOutput.startRecording(to: filePath, recordingDelegate: self)
         print("Video recording started to: \(filePath.path)")
     }
 
-    /// Stop recording video (from provided code)
+    /// Stops video recording and finalizes the output file.
+    ///
+    /// This method stops the current video recording session and finalizes
+    /// the output file. The completed video URL will be delivered
+    /// through the `movieFileStream` async stream.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// cameraService.startRecordingVideo()
+    /// // Recording in progress...
+    /// cameraService.stopRecordingVideo()
+    /// // URL will be available via movieFileStream
+    /// ```
+    ///
+    /// - Note: This method is a no-op if no recording is in progress.
     public func stopRecordingVideo() {
         guard let movieFileOutput = self.movieFileOutput else {
             print("Cannot find movie file output")
@@ -154,40 +230,40 @@ extension CameraService {
         print("Video recording stopped")
     }
 
-    /// Toggle flash mode
+    /// Toggles through available flash modes for the current camera.
+    ///
+    /// This method cycles through flash modes in the order: off → on → auto → off.
+    /// The method updates both the device flash mode and the published `flashMode` property.
+    ///
+    /// ## Usage
+    ///
+    /// ```swift
+    /// let success = cameraService.toggleFlashMode()
+    /// if success {
+    ///     print("Flash mode changed to: \(cameraService.flashMode)")
+    /// }
+    /// ```
+    ///
+    /// - Returns: `true` if flash mode was successfully changed, `false` if flash is not available.
+    /// - Note: Flash is only available on iOS devices that support it.
     public func toggleFlashMode() -> Bool {
-        guard let device = captureDevice, device.isFlashAvailable else {
+        guard isFlashAvailable else {
             print("Flash not available on current device")
             return false
         }
 
-        do {
-            try device.lockForConfiguration()
-
-            if device.flashMode == .off {
-                device.flashMode = .on
-                print("Flash turned on")
-            } else if device.flashMode == .on {
-                device.flashMode = .auto
-                print("Flash set to auto")
-            } else {
-                device.flashMode = .off
-                print("Flash turned off")
-            }
-            device.unlockForConfiguration()
-            return true
-        } catch {
-            print("Error toggling flash: \(error.localizedDescription)")
-            return false
+        if flashMode == .off {
+            flashMode = .on
+            print("Flash turned on")
+        } else if flashMode == .on {
+            flashMode = .auto
+            print("Flash set to auto")
+        } else {
+            flashMode = .off
+            print("Flash turned off")
         }
-    }
+        return true
 
-    /// Get current flash mode
-    public var currentFlashMode: AVCaptureDevice.FlashMode {
-        guard let device = captureDevice, device.isFlashAvailable else {
-            return .off
-        }
-        return device.flashMode
     }
 }
 

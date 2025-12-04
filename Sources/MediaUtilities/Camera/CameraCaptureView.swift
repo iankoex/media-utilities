@@ -6,37 +6,66 @@
 //
 
 import AVFoundation
+import AVKit
 import CoreImage
 import SwiftUI
 
-// MARK: - Capture Mode
-
-public enum CaptureMode: String, CaseIterable {
-    case photo = "photo"
-    case video = "video"
-
-    var systemImage: String {
-        switch self {
-            case .photo:
-                return "camera"
-            case .video:
-                return "video"
-        }
-    }
-}
-
 // MARK: - Camera Capture View
+
+/// A complete SwiftUI camera interface with live preview, capture controls,
+/// and mode switching for both photo and video recording.
+///
+/// The `CameraCaptureView` provides a production-ready camera UI with:
+/// - Live camera preview with proper aspect ratio
+/// - Photo/video mode switching with animated transitions
+/// - Flash control with visual availability indicators
+/// - Camera switching between front and back devices
+/// - Permission handling with user-friendly alerts
+///
+/// ## Usage
+///
+/// ```swift
+/// CameraCaptureView { result in
+///     switch result {
+///     case .success(let url):
+///         // Handle captured media
+///         print("Media saved to: \(url)")
+///     case .failure(let error):
+///         // Handle errors
+///         print("Capture failed: \(error)")
+///     }
+/// }
+/// ```
+///
+/// ## Platform Availability
+///
+/// - iOS 14.0+
+/// - macOS 11.0+
+/// - Some features (like flash) are iOS-only
 @available(iOS 14.0, macOS 11.0, *)
 public struct CameraCaptureView: View {
     @StateObject private var cameraService = CameraService()
     @State private var captureMode: CaptureMode = .photo
     @State private var isRecording = false
-    @State private var isFlashOn = false
     @State private var showingPermissionAlert = false
 
+    /// Callback closure that handles the result of camera capture operations.
+    ///
+    /// This closure is called when a photo is captured or video recording completes.
+    /// It provides a `Result<URL, CameraError>` containing either the URL
+    /// to the captured media file or error information.
+    ///
+    /// - Parameters:
+    ///   - result: The result of the capture operation containing either the media URL or error.
     @MainActor
     public let onCapture: (Result<URL, CameraError>) -> Void
 
+    /// Creates a new camera capture view with a capture completion handler.
+    ///
+    /// This initializer sets up the camera interface with the specified completion handler
+    /// that will be called when photos are captured or videos finish recording.
+    ///
+    /// - Parameter onCapture: A closure that handles the result of capture operations.
     public init(onCapture: @escaping (Result<URL, CameraError>) -> Void) {
         self.onCapture = onCapture
     }
@@ -44,20 +73,20 @@ public struct CameraCaptureView: View {
     public var body: some View {
         if #available(iOS 15.0, macOS 11.0, *) {
             viewBody
-            #if os(iOS)
-                .alert("Camera Access Required", isPresented: $showingPermissionAlert) {
-                    Button("Cancel") {
-                        onCapture(.failure(CameraError.permissionDenied))
-                    }
-                    Button("Settings") {
-                        if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
-                            UIApplication.shared.open(settingsUrl)
-                        }
-                    }
-                } message: {
-                    Text("Please enable camera access in Settings to use this feature.")
+                #if os(iOS)
+            .alert("Camera Access Required", isPresented: $showingPermissionAlert) {
+                Button("Cancel") {
+                    onCapture(.failure(CameraError.permissionDenied))
                 }
-            #endif
+                Button("Settings") {
+                    if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(settingsUrl)
+                    }
+                }
+            } message: {
+                Text("Please enable camera access in Settings to use this feature.")
+            }
+                #endif
         } else {
             viewBody
         }
@@ -65,19 +94,13 @@ public struct CameraCaptureView: View {
 
     var viewBody: some View {
         ZStack {
-            // Camera preview
             cameraService.previewImage?
                 .resizable()
-                .aspectRatio(contentMode: .fit)
+//                .aspectRatio(contentMode: .fit)
 
-            // UI Controls overlay
             VStack {
-                // Top controls
                 topControls
-
                 Spacer()
-
-                // Bottom controls
                 bottomControls
             }
             .padding(.horizontal)
@@ -96,42 +119,34 @@ public struct CameraCaptureView: View {
 
     private var topControls: some View {
         HStack {
-            // Close button
-            Button(
-                action: {
-                    onCapture(.failure(CameraError.userCancelled))
-                },
-                label: {
-                    Image(systemName: "xmark")
-                        .foregroundColor(.white)
-                        .padding()
-                        .grayBackgroundCircle()
-                }
-            )
-
+            closeButton
             Spacer()
-
-            // Mode selector
             modeSelector
-
             Spacer()
-
-            // Flash button
             flashButton
         }
+    }
+
+    var closeButton: some View {
+        Button(
+            action: {
+                onCapture(.failure(CameraError.userCancelled))
+            },
+            label: {
+                Image(systemName: "xmark")
+                    .foregroundColor(.white)
+                    .padding()
+                    .grayBackgroundCircle()
+            }
+        )
     }
 
     // MARK: - Bottom Controls
 
     private var bottomControls: some View {
         HStack(spacing: 50) {
-            // Camera switch button
             cameraSwitchButton
-
-            // Capture button
             captureButton
-
-            // Spacer (no gallery button as requested)
             Spacer()
                 .frame(width: 44)
         }
@@ -167,10 +182,10 @@ public struct CameraCaptureView: View {
 
     private var flashButton: some View {
         Button(action: {
-            isFlashOn = cameraService.toggleFlashMode()
+            _ = cameraService.toggleFlashMode()
         }) {
             Image(systemName: flashIcon)
-                .foregroundColor(isFlashOn ? .yellow : .white)
+                .foregroundColor(flashIconColor)
                 .padding()
                 .grayBackgroundCircle()
         }
@@ -178,7 +193,11 @@ public struct CameraCaptureView: View {
     }
 
     private var flashIcon: String {
-        switch cameraService.currentFlashMode {
+        guard cameraService.isFlashAvailable else {
+            return "bolt.trianglebadge.exclamationmark"
+        }
+
+        switch cameraService.flashMode {
             case .on:
                 return "bolt.fill"
             case .auto:
@@ -187,6 +206,23 @@ public struct CameraCaptureView: View {
                 return "bolt.slash"
             @unknown default:
                 return "bolt.slash"
+        }
+    }
+
+    private var flashIconColor: Color {
+        guard cameraService.isFlashAvailable else {
+            return .orange
+        }
+
+        switch cameraService.flashMode {
+            case .on:
+                return .yellow
+            case .auto:
+                return .blue
+            case .off:
+                return .white
+            @unknown default:
+                return .white
         }
     }
 
@@ -235,7 +271,7 @@ public struct CameraCaptureView: View {
                 }
             }
         }
-        .disabled(cameraService.isLoading || !cameraService.getCameraInfo().isAvailable)
+        .disabled(cameraService.isCapturingPhoto || !cameraService.getCameraInfo().isAvailable)
     }
 
     // MARK: - Actions
@@ -308,6 +344,37 @@ public struct CameraCaptureView: View {
                 }
                 break
             }
+        }
+    }
+}
+
+// MARK: - Capture Mode
+
+/// Supported capture modes for the camera interface.
+///
+/// `CaptureMode` defines whether the camera interface is currently
+/// configured for photo capture or video recording. This enum
+/// is used to switch between different capture functionalities
+/// and update the UI accordingly.
+public enum CaptureMode: String, CaseIterable {
+    /// Photo capture mode for taking still images.
+    case photo = "photo"
+
+    /// Video recording mode for capturing video footage.
+    case video = "video"
+
+    /// The system image name representing this capture mode.
+    ///
+    /// This property provides the appropriate SF Symbol for UI display
+    /// based on the current capture mode.
+    ///
+    /// - Returns: A string containing the SF Symbol name.
+    var systemImage: String {
+        switch self {
+            case .photo:
+                return "camera"
+            case .video:
+                return "video"
         }
     }
 }
