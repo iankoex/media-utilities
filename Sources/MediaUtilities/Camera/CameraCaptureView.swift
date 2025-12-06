@@ -45,7 +45,6 @@ import SwiftUI
 @available(iOS 14.0, macOS 11.0, *)
 public struct CameraCaptureView: View {
     @StateObject private var cameraService = CameraService()
-    @State private var captureMode: CaptureMode = .photo
     @State private var isRecording = false
     @State private var showingPermissionAlert = false
 
@@ -76,7 +75,7 @@ public struct CameraCaptureView: View {
                 #if os(iOS)
             .alert("Camera Access Required", isPresented: $showingPermissionAlert) {
                 Button("Cancel") {
-                    onCapture(.failure(CameraError.permissionDenied))
+                    onCapture(.failure(CameraError.userCancelled))
                 }
                 Button("Settings") {
                     if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
@@ -96,7 +95,7 @@ public struct CameraCaptureView: View {
         ZStack {
             cameraService.previewImage?
                 .resizable()
-            //                .aspectRatio(contentMode: .fit)
+                .aspectRatio(contentMode: .fit)
 
             VStack {
                 topControls
@@ -106,7 +105,7 @@ public struct CameraCaptureView: View {
             .padding(.horizontal)
             .padding(.vertical, 20)
         }
-        .background(Color.black)
+        .background(Color.black.ignoresSafeArea(.all))
         .onAppear {
             Task { await initializeCamera() }
         }
@@ -162,7 +161,7 @@ public struct CameraCaptureView: View {
     // MARK: - Mode Selector
 
     private var modeSelector: some View {
-        Picker("Capture Mode", selection: $captureMode) {
+        Picker("Capture Mode", selection: $cameraService.captureMode) {
             ForEach(CaptureMode.allCases, id: \.self) { mode in
                 Label(mode.rawValue, systemImage: mode.systemImage)
                     .labelStyle(.iconOnly)
@@ -206,6 +205,25 @@ public struct CameraCaptureView: View {
             return .orange
         }
 
+        // During video recording, show torch status
+        if cameraService.captureMode == .video && cameraService.movieFileOutput?.isRecording == true {
+            if cameraService.isTorchAvailable {
+                switch cameraService.flashMode {
+                case .on:
+                    return .yellow
+                case .auto:
+                    return .blue
+                case .off:
+                    return .white
+                @unknown default:
+                    return .white
+                }
+            } else {
+                return .gray
+            }
+        }
+
+        // Photo mode - show flash status
         switch cameraService.flashMode {
             case .on:
                 return .yellow
@@ -238,7 +256,7 @@ public struct CameraCaptureView: View {
 
     private var captureButton: some View {
         Button(action: {
-            if captureMode == .photo {
+            if cameraService.captureMode == .photo {
                 capturePhoto()
             } else {
                 toggleVideoRecording()
@@ -258,7 +276,7 @@ public struct CameraCaptureView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 } else {
                     Circle()
-                        .fill(captureMode == .video ? .red : .black)
+                        .fill(cameraService.captureMode == .video ? .red : .black)
                         .frame(width: 60, height: 60)
                 }
             }
@@ -336,37 +354,6 @@ public struct CameraCaptureView: View {
                 }
                 break
             }
-        }
-    }
-}
-
-// MARK: - Capture Mode
-
-/// Supported capture modes for the camera interface.
-///
-/// `CaptureMode` defines whether the camera interface is currently
-/// configured for photo capture or video recording. This enum
-/// is used to switch between different capture functionalities
-/// and update the UI accordingly.
-public enum CaptureMode: String, CaseIterable {
-    /// Photo capture mode for taking still images.
-    case photo = "photo"
-
-    /// Video recording mode for capturing video footage.
-    case video = "video"
-
-    /// The system image name representing this capture mode.
-    ///
-    /// This property provides the appropriate SF Symbol for UI display
-    /// based on the current capture mode.
-    ///
-    /// - Returns: A string containing the SF Symbol name.
-    var systemImage: String {
-        switch self {
-            case .photo:
-                return "camera"
-            case .video:
-                return "video"
         }
     }
 }

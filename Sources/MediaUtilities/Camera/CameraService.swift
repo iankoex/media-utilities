@@ -78,10 +78,29 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
 
     /// The current flash mode setting for the camera.
     ///
-    /// This property controls the flash behavior when capturing photos.
+    /// This computed property returns the appropriate flash/torch mode based on current capture mode.
+    /// For photo mode: returns photoFlashMode
+    /// For video mode: returns videoTorchMode
     /// Changes to this property are automatically reflected in the UI.
     /// - Note: Flash is only available on iOS devices that support it.
-    @Published public var flashMode: AVCaptureDevice.FlashMode = .off
+    public var flashMode: AVCaptureDevice.FlashMode {
+        get {
+            return captureMode == .photo ? photoFlashMode : videoTorchMode
+        }
+        set {
+            if captureMode == .photo {
+                photoFlashMode = newValue
+            } else {
+                videoTorchMode = newValue
+            }
+        }
+    }
+
+    /// Flash mode for photo capture (preserved when switching modes).
+    var photoFlashMode: AVCaptureDevice.FlashMode = .off
+
+    /// Torch mode for video recording (preserved when switching modes).
+    var videoTorchMode: AVCaptureDevice.FlashMode = .off
 
     /// Indicates whether a photo capture operation is currently in progress.
     ///
@@ -96,6 +115,17 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
     /// performance optimization or when the camera view is not visible.
     @Published public var isPreviewPaused = false
 
+    /// The current capture mode (photo or video).
+    ///
+    /// This property tracks whether the camera interface is in photo or video mode.
+    /// It's used to determine flash vs torch behavior.
+    /// When switching to video mode, torch is set to off by default.
+    @Published public var captureMode: CaptureMode = .photo {
+        didSet {
+            updateTorchForCurrentMode()
+        }
+    }
+
     // MARK: - Device Properties
 
     private var allCaptureDevices: [AVCaptureDevice] {
@@ -106,7 +136,6 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
                 .builtInDualCamera,
                 .builtInDualWideCamera,
                 .builtInWideAngleCamera,
-                .builtInDualWideCamera,
             ],
             mediaType: .video,
             position: .unspecified
@@ -132,9 +161,27 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
 
     private var captureDevices: [AVCaptureDevice] {
         var devices = [AVCaptureDevice]()
+        #if os(iOS)
+        // Prefer back camera with .builtInWideAngleCamera device type (standard 1x zoom)
+        let sortedBackDevices = backCaptureDevices.sorted { device1, device2 in
+            if device1.deviceType == .builtInWideAngleCamera && device2.deviceType != .builtInWideAngleCamera {
+                return true
+            } else if device2.deviceType == .builtInWideAngleCamera && device1.deviceType != .builtInWideAngleCamera {
+                return false
+            } else {
+                // If both are the same type or neither is wide angle, maintain original order
+                return false
+            }
+        }
+        if let backDevice = sortedBackDevices.first {
+            devices += [backDevice]
+        }
+        #else
+        // On macOS, just use the first available back camera
         if let backDevice = backCaptureDevices.first {
             devices += [backDevice]
         }
+        #endif
         if let frontDevice = frontCaptureDevices.first {
             devices += [frontDevice]
         }
@@ -199,6 +246,16 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
     public var isFlashAvailable: Bool {
         guard let captureDevice = captureDevice else { return false }
         return captureDevice.isFlashAvailable
+    }
+
+    /// A Boolean value indicating whether the current camera device supports torch.
+    ///
+    /// Returns `true` if the currently selected camera device has torch capabilities.
+    /// Torch is used for continuous lighting during video recording.
+    /// This property updates automatically when switching between cameras.
+    public var isTorchAvailable: Bool {
+        guard let captureDevice = captureDevice else { return false }
+        return captureDevice.isTorchAvailable
     }
 
     /// The current authorization status for camera access.
@@ -303,11 +360,12 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
         }
     }
 
+    @concurrent
     func handleCameraPreviews() async {
         let imageStream = previewStream.map { $0.image }
 
         for await image in imageStream {
-            Task { @MainActor in
+            await MainActor.run {
                 previewImage = image
             }
         }
@@ -319,7 +377,7 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
         super.init()
 
         captureSession.sessionPreset = .photo
-        sessionQueue = DispatchQueue(label: "session queue")
+        sessionQueue = DispatchQueue(label: "MediaUtilities.CameraService.sessionQueue")
         captureDevice = availableCaptureDevices.first ?? AVCaptureDevice.default(for: .video)
     }
 
@@ -352,6 +410,19 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
                 captureSession.addInput(deviceInput)
             }
         }
+
+        // Reset zoom factor to 1.0 for consistent default zoom
+        #if os(iOS)
+        do {
+            try captureDevice.lockForConfiguration()
+            if captureDevice.videoZoomFactor != 1.0 {
+                captureDevice.videoZoomFactor = 1.0
+            }
+            captureDevice.unlockForConfiguration()
+        } catch {
+            print("Failed to reset camera zoom factor: \(error.localizedDescription)")
+        }
+        #endif
 
         updateVideoOutputConnection()
     }

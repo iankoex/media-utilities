@@ -173,6 +173,7 @@ extension CameraService {
     /// This method begins video recording using the current camera configuration.
     /// The video is saved to a temporary file in the documents directory.
     /// Recording continues until `stopRecordingVideo()` is called.
+    /// Torch mode is automatically configured based on flash settings.
     ///
     /// ## Usage
     ///
@@ -198,6 +199,9 @@ extension CameraService {
             return
         }
 
+        // Torch is already configured by toggleFlashMode() for immediate feedback
+        // No need to configure it again here
+
         let fileName = UUID().uuidString
         let filePath = directoryPath.appendingPathComponent(fileName).appendingPathExtension("mp4")
         movieFileOutput.startRecording(to: filePath, recordingDelegate: self)
@@ -209,6 +213,7 @@ extension CameraService {
     /// This method stops the current video recording session and finalizes
     /// the output file. The completed video URL will be delivered
     /// through the `movieFileStream` async stream.
+    /// Torch state is preserved after recording stops.
     ///
     /// ## Usage
     ///
@@ -225,6 +230,10 @@ extension CameraService {
             print("Cannot find movie file output")
             return
         }
+
+        // Torch state is preserved - don't turn it off automatically
+        // User can turn it off manually via flash button if desired
+
         movieFileOutput.stopRecording()
         print("Video recording stopped")
     }
@@ -232,7 +241,9 @@ extension CameraService {
     /// Toggles through available flash modes for the current camera.
     ///
     /// This method cycles through flash modes in the order: off → on → auto → off.
-    /// The method updates both the device flash mode and the published `flashMode` property.
+    /// The method updates the published `flashMode` property.
+    /// For photos: flash activates only during photo capture.
+    /// For videos: torch activates immediately when enabled (like iPhone Camera app).
     ///
     /// ## Usage
     ///
@@ -250,12 +261,124 @@ extension CameraService {
             return
         }
 
-        if flashMode == .off {
-            flashMode = .on
-        } else if flashMode == .on {
-            flashMode = .auto
+        // Update the appropriate mode based on current capture mode
+        if captureMode == .photo {
+            if photoFlashMode == .off {
+                photoFlashMode = .on
+            } else if photoFlashMode == .on {
+                photoFlashMode = .auto
+            } else {
+                photoFlashMode = .off
+            }
         } else {
-            flashMode = .off
+            if videoTorchMode == .off {
+                videoTorchMode = .on
+            } else if videoTorchMode == .on {
+                videoTorchMode = .auto
+            } else {
+                videoTorchMode = .off
+            }
+
+            // For video mode, activate/deactivate torch immediately (like iPhone Camera app)
+            updateTorchForVideoMode()
+        }
+    }
+
+    /// Updates torch state based on current capture mode and settings.
+    ///
+    /// This method ensures the torch state matches the current mode's settings.
+    /// For photo mode: torch is off
+    /// For video mode: torch matches videoTorchMode setting
+    func updateTorchForCurrentMode() {
+        guard let captureDevice = captureDevice, isTorchAvailable else {
+            return
+        }
+
+        do {
+            try captureDevice.lockForConfiguration()
+            defer { captureDevice.unlockForConfiguration() }
+
+            if captureMode == .photo {
+                // In photo mode, ensure torch is off
+                if captureDevice.torchMode != .off {
+                    captureDevice.torchMode = .off
+                }
+            } else {
+                // In video mode, set torch according to videoTorchMode
+                switch videoTorchMode {
+                    case .off:
+                        if captureDevice.torchMode != .off {
+                            captureDevice.torchMode = .off
+                        }
+                    case .on:
+                        captureDevice.torchMode = .on
+                    case .auto:
+                        captureDevice.torchMode = .auto
+                    @unknown default:
+                        captureDevice.torchMode = .off
+                }
+            }
+        } catch {
+            print("Failed to update torch for current mode: \(error.localizedDescription)")
+        }
+    }
+
+    /// Updates torch state immediately for video mode (like iPhone Camera app).
+    ///
+    /// When in video mode, torch should turn on/off immediately when flash button is pressed,
+    /// providing instant visual feedback to the user.
+    private func updateTorchForVideoMode() {
+        guard captureMode == .video, let captureDevice = captureDevice, isTorchAvailable else {
+            return
+        }
+
+        do {
+            try captureDevice.lockForConfiguration()
+            defer { captureDevice.unlockForConfiguration() }
+
+            switch videoTorchMode {
+                case .off:
+                    if captureDevice.torchMode != .off {
+                        captureDevice.torchMode = .off
+                    }
+                case .on:
+                    captureDevice.torchMode = .on
+                case .auto:
+                    captureDevice.torchMode = .auto
+                @unknown default:
+                    captureDevice.torchMode = .off
+            }
+        } catch {
+            print("Failed to update torch for video mode: \(error.localizedDescription)")
+        }
+    }
+
+    /// Configures torch mode for video recording based on current flash settings.
+    ///
+    /// This method activates torch during video recording if flash is enabled.
+    /// Torch is only active during actual recording, not just when flash button is pressed.
+    private func configureTorchForVideoRecording() {
+        guard let captureDevice = captureDevice, isTorchAvailable else {
+            return
+        }
+
+        do {
+            try captureDevice.lockForConfiguration()
+            defer { captureDevice.unlockForConfiguration() }
+
+            switch flashMode {
+                case .off:
+                    // Torch remains off
+                    break
+                case .on:
+                    captureDevice.torchMode = .on
+                case .auto:
+                    captureDevice.torchMode = .auto
+                @unknown default:
+                    break
+            }
+        } catch {
+            print("Failed to configure torch for video recording: \(error.localizedDescription)")
         }
     }
 }
