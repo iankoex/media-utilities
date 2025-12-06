@@ -28,7 +28,7 @@ extension View {
     /// ```swift
     /// struct ContentView: View {
     ///     @State private var showCamera = false
-    ///     
+    ///
     ///     var body: some View {
     ///         VStack {
     ///             Button("Open Camera") {

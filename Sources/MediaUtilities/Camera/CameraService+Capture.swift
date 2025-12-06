@@ -33,7 +33,6 @@ extension CameraService {
     /// - Note: This method is a no-op if the session is already running.
     public func start() async {
         guard authorizationStatus == .authorized else {
-            print("Camera access not authorized, cannot start session")
             return
         }
 
@@ -49,11 +48,9 @@ extension CameraService {
         sessionQueue.async { [self] in
             self.configureCaptureSession { success in
                 guard success else {
-                    print("Failed to configure capture session")
                     return
                 }
                 self.captureSession.startRunning()
-                print("Capture session started successfully")
             }
         }
     }
@@ -74,14 +71,12 @@ extension CameraService {
     /// - Note: This method is a no-op if the session is not running.
     public func stop() {
         guard isCaptureSessionConfigured else {
-            print("Capture session not configured, cannot stop")
             return
         }
 
         if captureSession.isRunning {
             sessionQueue.async { [self] in
                 self.captureSession.stopRunning()
-                print("Capture session stopped")
             }
         }
     }
@@ -104,10 +99,8 @@ extension CameraService {
         if let captureDevice = captureDevice, let index = availableCaptureDevices.firstIndex(of: captureDevice) {
             let nextIndex = (index + 1) % availableCaptureDevices.count
             self.captureDevice = availableCaptureDevices[nextIndex]
-            print("Switched to camera at index \(nextIndex)")
         } else {
             self.captureDevice = AVCaptureDevice.default(for: .video)
-            print("Switched to default camera")
         }
     }
 
@@ -130,7 +123,6 @@ extension CameraService {
     @concurrent
     public func capturePhoto() async -> URL? {
         guard let photoOutput = self.photoOutput else {
-            print("Photo output not available")
             return nil
         }
 
@@ -167,7 +159,6 @@ extension CameraService {
                 self.photoCaptureContinuation = continuation
 
                 photoOutput.capturePhoto(with: photoSettings, delegate: self)
-                print("Photo capture initiated")
             }
         }
     }
@@ -190,16 +181,12 @@ extension CameraService {
     /// - Note: Use `movieFileStream` to receive the URL when recording completes.
     public func startRecordingVideo() {
         guard let movieFileOutput = self.movieFileOutput else {
-            print("Cannot find movie file output")
-            print("Video recording not available")
             return
         }
 
         guard
             let directoryPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         else {
-            print("Cannot access local file domain")
-            print("Cannot save video to device")
             return
         }
 
@@ -212,8 +199,6 @@ extension CameraService {
 
         // Play system sound for recording start
         playRecordingStartSound()
-
-        print("Video recording started to: \(filePath.path)")
     }
 
     /// Stops video recording and finalizes the output file.
@@ -235,7 +220,6 @@ extension CameraService {
     /// - Note: This method is a no-op if no recording is in progress.
     public func stopRecordingVideo() {
         guard let movieFileOutput = self.movieFileOutput else {
-            print("Cannot find movie file output")
             return
         }
 
@@ -246,8 +230,6 @@ extension CameraService {
 
         // Play system sound for recording stop
         playRecordingStopSound()
-
-        print("Video recording stopped")
     }
 
     /// Toggles through available flash modes for the current camera.
@@ -353,7 +335,7 @@ extension CameraService {
                 }
             }
         } catch {
-            print("Failed to update torch for current mode: \(error.localizedDescription)")
+            // Torch update failed - continue silently
         }
     }
 
@@ -383,7 +365,7 @@ extension CameraService {
                     captureDevice.torchMode = .off
             }
         } catch {
-            print("Failed to update torch for video mode: \(error.localizedDescription)")
+            // Torch update failed - continue silently
         }
     }
 
@@ -412,7 +394,7 @@ extension CameraService {
                     break
             }
         } catch {
-            print("Failed to configure torch for video recording: \(error.localizedDescription)")
+            // Torch configuration failed - continue silently
         }
     }
 }

@@ -6,7 +6,6 @@
 //
 
 import AVFoundation
-import CoreImage
 import Foundation
 import SwiftUI
 
@@ -130,7 +129,7 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
 
     // MARK: - Audio Device Properties
 
-    private var audioDevice: AVCaptureDevice? {
+    var audioDevice: AVCaptureDevice? {
         return AVCaptureDevice.default(for: .audio)
     }
 
@@ -275,6 +274,13 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
         AVCaptureDevice.authorizationStatus(for: .video)
     }
 
+    /// This property returns the current permission status for microphone access
+    /// without triggering a permission request. Use `requestCameraAccess()`
+    /// to prompt the user for permission if needed.
+    public var microphoneAuthorizationStatus: AVAuthorizationStatus {
+        AVCaptureDevice.authorizationStatus(for: .audio)
+    }
+
     /// A Boolean value indicating whether any camera devices are available on the current device.
     ///
     /// Returns `true` if the device has at least one available camera that can be used
@@ -288,6 +294,17 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
     /// or camera access has not been granted.
     public var isCameraAvailable: Bool {
         authorizationStatus == .authorized && !availableCaptureDevices.isEmpty
+    }
+
+    /// A Boolean value indicating whether camera and microphone are both available and authorized.
+    ///
+    /// Returns `true` if the device has camera access AND microphone access (for video recording with audio).
+    /// Returns `false` if either camera or microphone access has not been granted.
+    /// This is useful for checking if video recording with audio is possible.
+    public var isCameraAndMicrophoneAvailable: Bool {
+        authorizationStatus == .authorized &&
+        microphoneAuthorizationStatus == .authorized &&
+        !availableCaptureDevices.isEmpty
     }
 
     // MARK: - Async Streams
@@ -368,17 +385,6 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
         }
     }
 
-    @concurrent
-    func handleCameraPreviews() async {
-        let imageStream = previewStream.map { $0.image }
-
-        for await image in imageStream {
-            await MainActor.run {
-                previewImage = image
-            }
-        }
-    }
-
     // MARK: - Initialization
 
     public override init() {
@@ -388,161 +394,5 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
         captureSession.sessionPreset = .photo
 
         captureDevice = availableCaptureDevices.first ?? AVCaptureDevice.default(for: .video)
-    }
-
-    // MARK: - Private Helper Methods
-
-    private func deviceInputFor(device: AVCaptureDevice?) -> AVCaptureDeviceInput? {
-        guard let validDevice = device else { return nil }
-        do {
-            return try AVCaptureDeviceInput(device: validDevice)
-        } catch let error {
-            print("Error getting capture device input: \(error.localizedDescription)")
-            return nil
-        }
-    }
-
-    private func updateSessionForCaptureDevice(_ captureDevice: AVCaptureDevice) {
-        guard isCaptureSessionConfigured else { return }
-
-        captureSession.beginConfiguration()
-        defer { captureSession.commitConfiguration() }
-
-        for input in captureSession.inputs {
-            if let deviceInput = input as? AVCaptureDeviceInput {
-                captureSession.removeInput(deviceInput)
-            }
-        }
-
-        if let deviceInput = deviceInputFor(device: captureDevice) {
-            if !captureSession.inputs.contains(deviceInput), captureSession.canAddInput(deviceInput) {
-                captureSession.addInput(deviceInput)
-            }
-        }
-
-        // Re-add audio input if available
-        if let audioDevice = audioDevice,
-            let audioInput = try? AVCaptureDeviceInput(device: audioDevice),
-            !captureSession.inputs.contains(audioInput),
-            captureSession.canAddInput(audioInput)
-        {
-            captureSession.addInput(audioInput)
-            self.audioInput = audioInput
-        }
-
-        // Reset zoom factor to 1.0 for consistent default zoom
-        #if os(iOS)
-        do {
-            try captureDevice.lockForConfiguration()
-            if captureDevice.videoZoomFactor != 1.0 {
-                captureDevice.videoZoomFactor = 1.0
-            }
-            captureDevice.unlockForConfiguration()
-        } catch {
-            print("Failed to reset camera zoom factor: \(error.localizedDescription)")
-        }
-        #endif
-
-        updateVideoOutputConnection()
-    }
-
-    private func updateVideoOutputConnection() {
-        if let videoOutput = videoOutput, let videoOutputConnection = videoOutput.connection(with: .video) {
-            if videoOutputConnection.isVideoMirroringSupported {
-                videoOutputConnection.isVideoMirrored = isUsingFrontCaptureDevice
-            }
-        }
-    }
-
-    func configureCaptureSession(completionHandler: (_ success: Bool) -> Void) {
-        var success = false
-
-        self.captureSession.beginConfiguration()
-
-        defer {
-            self.captureSession.commitConfiguration()
-            completionHandler(success)
-        }
-
-        guard
-            let captureDevice = captureDevice,
-            let deviceInput = try? AVCaptureDeviceInput(device: captureDevice)
-        else {
-            print("Failed to obtain video input.")
-            return
-        }
-
-        let movieFileOutput = AVCaptureMovieFileOutput()
-        let photoOutput = AVCapturePhotoOutput()
-        let videoOutput = AVCaptureVideoDataOutput()
-
-        videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "VideoDataOutputQueue"))
-
-        guard captureSession.canAddInput(deviceInput) else {
-            print("Unable to add device input to capture session.")
-            return
-        }
-        guard captureSession.canAddOutput(photoOutput) else {
-            print("Unable to add photo output to capture session.")
-            return
-        }
-        guard captureSession.canAddOutput(videoOutput) else {
-            print("Unable to add video output to capture session.")
-            return
-        }
-
-        captureSession.addInput(deviceInput)
-
-        // Add audio input for video recording with audio
-        if let audioDevice = audioDevice,
-            let audioInput = try? AVCaptureDeviceInput(device: audioDevice),
-            captureSession.canAddInput(audioInput)
-        {
-            captureSession.addInput(audioInput)
-            self.audioInput = audioInput
-            print("Audio input added to capture session")
-        } else {
-            print("Audio input not available or cannot be added")
-        }
-
-        captureSession.addOutput(photoOutput)
-        captureSession.addOutput(videoOutput)
-        captureSession.addOutput(movieFileOutput)
-
-        self.deviceInput = deviceInput
-        self.photoOutput = photoOutput
-        self.videoOutput = videoOutput
-        self.movieFileOutput = movieFileOutput
-
-        if #available(macOS 13.0, *) {
-            photoOutput.maxPhotoQualityPrioritization = .balanced
-        } else {
-            // Fallback on earlier versions
-        }
-
-        updateVideoOutputConnection()
-
-        isCaptureSessionConfigured = true
-        success = true
-
-        print("Capture session configured successfully")
-    }
-}
-
-// MARK: - Rotation Angle
-
-enum RotationAngle: CGFloat {
-    case portrait = 90
-    case portraitUpsideDown = 270
-    case landscapeRight = 180
-    case landscapeLeft = 0
-}
-
-@available(iOS 13.0, macOS 10.15, *)
-extension CIImage {
-    fileprivate var image: Image? {
-        let ciContext = CIContext()
-        guard let cgImage = ciContext.createCGImage(self, from: self.extent) else { return nil }
-        return Image(decorative: cgImage, scale: 1, orientation: .up)
     }
 }

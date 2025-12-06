@@ -13,31 +13,32 @@ import Foundation
 @available(iOS 13.0, macOS 10.15, *)
 extension CameraService {
 
-    /// Requests camera access permission from the user.
+    /// Requests camera and microphone access permissions from the user.
     ///
-    /// This method prompts the user for camera access permission if it hasn't
-    /// been determined yet. The permission dialog will only be shown once,
-    /// subsequent calls will return the current permission status.
+    /// This method prompts the user for both camera and microphone access permissions
+    /// if they haven't been determined yet. Both permissions are requested concurrently
+    /// for a unified permission experience. The permission dialogs will only be shown once,
+    /// subsequent calls will return the current permission statuses.
     ///
     /// ## Usage
     ///
     /// ```swift
     /// await cameraService.requestCameraAccess()
-    /// let status = cameraService.authorizationStatus
-    /// if status == .authorized {
-    ///     print("Camera access granted")
+    /// let cameraStatus = cameraService.authorizationStatus
+    /// let micStatus = cameraService.microphoneAuthorizationStatus
+    /// if cameraStatus == .authorized && micStatus == .authorized {
+    ///     // Both permissions granted
     /// }
     /// ```
     ///
-    /// - Note: This method should be called before attempting to use the camera.
+    /// - Note: This method should be called before attempting to use camera features that require audio.
     @concurrent
     public func requestCameraAccess() async {
-        guard authorizationStatus == .notDetermined else {
-            print("Camera access already authorized")
-            return
-        }
-        sessionQueue.suspend()
-        _ = await AVCaptureDevice.requestAccess(for: .video)
-        sessionQueue.resume()
+        // Request both video and audio permissions concurrently
+        async let videoPermission = AVCaptureDevice.requestAccess(for: .video)
+        async let audioPermission = AVCaptureDevice.requestAccess(for: .audio)
+
+        // Wait for both permission requests to complete
+        _ = await (videoPermission, audioPermission)
     }
 }

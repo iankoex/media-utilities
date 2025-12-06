@@ -9,7 +9,6 @@ import SwiftUI
 
 @available(iOS 14.0, macOS 11.0, *)
 struct RecordingTimeView: View {
-
     let time: Double
 
     var body: some View {
@@ -19,8 +18,8 @@ struct RecordingTimeView: View {
     }
 }
 
-fileprivate extension TimeInterval {
-    var formatted: String {
+extension TimeInterval {
+    fileprivate var formatted: String {
         let time = Int(self)
         let seconds = time % 60
         let minutes = (time / 60) % 60

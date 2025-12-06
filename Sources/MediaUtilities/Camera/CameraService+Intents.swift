@@ -19,6 +19,9 @@ public enum CameraError: LocalizedError, Equatable {
     /// Camera access was denied by the user.
     case permissionDenied
 
+    /// Microphone access was denied by the user.
+    case microphonePermissionDenied
+
     /// No camera hardware is available on the current device.
     case deviceNotAvailable
 
@@ -41,6 +44,8 @@ public enum CameraError: LocalizedError, Equatable {
         switch self {
             case .permissionDenied:
                 return "Camera access denied. Please enable in Settings"
+            case .microphonePermissionDenied:
+                return "Microphone access denied. Please enable in Settings"
             case .deviceNotAvailable:
                 return "Camera is not available on this device"
             case .captureFailed:
@@ -59,6 +64,7 @@ public enum CameraError: LocalizedError, Equatable {
 }
 
 // MARK: - High-Level User-Facing Operations
+
 @available(iOS 13.0, macOS 10.15, *)
 extension CameraService {
 
@@ -97,13 +103,17 @@ extension CameraService {
             await start()
         }
 
-        isCapturingPhoto = true
-        defer { isCapturingPhoto = false }
+        await MainActor.run {
+            isCapturingPhoto = true
+        }
 
         guard let photoURL = await capturePhoto() else {
             return .failure(.captureFailed)
         }
 
+        await MainActor.run {
+            isCapturingPhoto = false
+        }
         return .success(photoURL)
     }
 
@@ -131,6 +141,10 @@ extension CameraService {
         // Check permissions first
         guard authorizationStatus == .authorized else {
             return .failure(.permissionDenied)
+        }
+
+        guard microphoneAuthorizationStatus == .authorized else {
+            return .failure(.microphonePermissionDenied)
         }
 
         // Check camera availability
@@ -199,6 +213,12 @@ extension CameraService {
     /// - Returns: `Result<Void, CameraError>` indicating initialization success or failure.
     /// - Note: After successful initialization, preview frames are available via `previewStream`.
     public func initializeCamera() async -> Result<Void, CameraError> {
+        if authorizationStatus == .notDetermined {
+            await requestCameraAccess()
+        }
+        if authorizationStatus != .authorized {
+            return .failure(.permissionDenied)
+        }
         guard isCameraAvailable else {
             return .failure(.deviceNotAvailable)
         }
@@ -258,7 +278,6 @@ extension CameraService {
         // Clear photo capture continuation
         photoCaptureContinuation = nil
 
-        print("Camera resources and state cleaned up")
     }
 
     /// Returns comprehensive information about current camera state and capabilities.
@@ -345,73 +364,5 @@ public struct CameraInfo {
         self.flashMode = flashMode
         self.isFlashAvailable = isFlashAvailable
         self.isRunning = isRunning
-    }
-}
-
-// MARK: - Convenience Methods
-@available(iOS 13.0, macOS 10.15, *)
-extension CameraService {
-
-    /// Captures a photo with simplified error handling.
-    ///
-    /// This method provides a convenient way to capture photos without
-    /// dealing with Result types. It returns `nil` on failure
-    /// and prints error messages to console.
-    ///
-    /// ## Usage
-    ///
-    /// ```swift
-    /// if let photoURL = await cameraService.quickPhotoCapture() {
-    ///     print("Photo captured: \(photoURL)")
-    /// } else {
-    ///     print("Photo capture failed")
-    /// }
-    /// ```
-    ///
-    /// - Returns: URL to captured photo, or `nil` if capture failed.
-    /// - Note: For proper error handling, use `capturePhotoWithCompletion()` instead.
-    @concurrent
-    public func quickPhotoCapture() async -> URL? {
-        let result = await capturePhotoWithCompletion()
-
-        switch result {
-            case .success(let url):
-                print("Photo captured successfully")
-                return url
-            case .failure(let error):
-                print(error.errorDescription ?? "Failed to capture photo")
-                return nil
-        }
-    }
-
-    /// Starts video recording with simplified error handling.
-    ///
-    /// This method provides a convenient way to start video recording without
-    /// dealing with Result types. It returns `false` on failure
-    /// and prints error messages to console.
-    ///
-    /// ## Usage
-    ///
-    /// ```swift
-    /// if cameraService.quickVideoStart() {
-    ///     print("Video recording started")
-    /// } else {
-    ///     print("Failed to start recording")
-    /// }
-    /// ```
-    ///
-    /// - Returns: `true` if recording started successfully, `false` otherwise.
-    /// - Note: For proper error handling, use `startVideoRecording()` instead.
-    public func quickVideoStart() -> Bool {
-        let result = startVideoRecording()
-
-        switch result {
-            case .success:
-                print("Video recording started successfully")
-                return true
-            case .failure(let error):
-                print(error.errorDescription ?? "Failed to start recording")
-                return false
-        }
     }
 }

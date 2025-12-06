@@ -5,6 +5,8 @@
 //  Created by ian on 06/12/2025.
 //
 
+import Foundation
+
 // MARK: - Capture Mode
 
 /// Supported capture modes for the camera interface.
@@ -34,4 +36,13 @@ public enum CaptureMode: String, CaseIterable {
                 return "video"
         }
     }
+}
+
+// MARK: - Rotation Angle
+
+enum RotationAngle: CGFloat {
+    case portrait = 90
+    case portraitUpsideDown = 270
+    case landscapeRight = 180
+    case landscapeLeft = 0
 }

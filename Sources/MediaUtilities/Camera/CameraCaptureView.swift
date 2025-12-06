@@ -7,7 +7,6 @@
 
 import AVFoundation
 import AVKit
-import CoreImage
 import SwiftUI
 
 // MARK: - Camera Capture View
@@ -209,14 +208,14 @@ public struct CameraCaptureView: View {
         if cameraService.captureMode == .video && cameraService.movieFileOutput?.isRecording == true {
             if cameraService.isTorchAvailable {
                 switch cameraService.flashMode {
-                case .on:
-                    return .yellow
-                case .auto:
-                    return .blue
-                case .off:
-                    return .white
-                @unknown default:
-                    return .white
+                    case .on:
+                        return .yellow
+                    case .auto:
+                        return .blue
+                    case .off:
+                        return .white
+                    @unknown default:
+                        return .white
                 }
             } else {
                 return .gray
@@ -291,13 +290,11 @@ public struct CameraCaptureView: View {
 
         switch result {
             case .success:
-                print("Camera initialized successfully")
+                break
             case .failure(let error):
-                print("Failed to initialize camera: \(error.localizedDescription)")
-                if error == CameraError.permissionDenied {
+                if error == CameraError.permissionDenied || error == CameraError.microphonePermissionDenied {
                     showingPermissionAlert = true
                 } else {
-                    print(error.errorDescription ?? "Failed to initialize camera")
                     onCapture(.failure(error))
                 }
         }
@@ -312,7 +309,6 @@ public struct CameraCaptureView: View {
                     case .success(let url):
                         onCapture(.success(url))
                     case .failure(let error):
-                        print(error.errorDescription ?? "Failed to capture photo")
                         onCapture(.failure(error))
                 }
             }
@@ -336,7 +332,7 @@ public struct CameraCaptureView: View {
                     isRecording = true
                 }
             case .failure(let error):
-                print(error.errorDescription ?? "Failed to start recording")
+                onCapture(.failure(error))
         }
     }
 
