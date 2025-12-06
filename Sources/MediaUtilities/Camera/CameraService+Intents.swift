@@ -18,22 +18,22 @@ import Foundation
 public enum CameraError: LocalizedError, Equatable {
     /// Camera access was denied by the user.
     case permissionDenied
-    
+
     /// No camera hardware is available on the current device.
     case deviceNotAvailable
-    
+
     /// Photo capture operation failed.
     case captureFailed
-    
+
     /// Video recording operation failed.
     case recordingFailed
-    
+
     /// Camera session configuration failed.
     case configurationFailed
-    
+
     /// User cancelled the camera operation.
     case userCancelled
-    
+
     /// An unexpected error occurred with a custom message.
     case unknown(String)
 
@@ -230,8 +230,35 @@ extension CameraService {
     public func cleanupCamera() {
         stop()
         removeSessionObservers()
+
+        // Reset all state variables for clean initialization
         isCaptureSessionConfigured = false
-        print("Camera resources cleaned up")
+        captureDevice = nil
+        deviceInput = nil
+        audioInput = nil
+        photoOutput = nil
+        movieFileOutput = nil
+        videoOutput = nil
+
+        // Reset flash/torch modes to defaults
+        photoFlashMode = .off
+        videoTorchMode = .off
+        captureMode = .photo
+
+        // Reset other state
+        isCapturingPhoto = false
+        isPreviewPaused = false
+        previewImage = nil
+
+        // Clear async stream continuations
+        addToPhotoStream = nil
+        addToMovieFileStream = nil
+        addToPreviewStream = nil
+
+        // Clear photo capture continuation
+        photoCaptureContinuation = nil
+
+        print("Camera resources and state cleaned up")
     }
 
     /// Returns comprehensive information about current camera state and capabilities.
@@ -273,22 +300,22 @@ extension CameraService {
 public struct CameraInfo {
     /// Whether camera hardware is available on the device.
     public let isAvailable: Bool
-    
+
     /// Whether camera access has been authorized by the user.
     public let isAuthorized: Bool
-    
+
     /// Whether the front-facing camera is currently active.
     public let isUsingFrontCamera: Bool
-    
+
     /// Whether the back-facing camera is currently active.
     public let isUsingBackCamera: Bool
-    
+
     /// The current flash mode setting.
     public let flashMode: AVCaptureDevice.FlashMode
-    
+
     /// Whether the current camera device supports flash.
     public let isFlashAvailable: Bool
-    
+
     /// Whether the camera capture session is currently running.
     public let isRunning: Bool
 

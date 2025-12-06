@@ -8,6 +8,10 @@
 import AVFoundation
 import Foundation
 
+#if os(iOS)
+import AudioToolbox
+#endif
+
 // MARK: - Capture Operations
 
 @available(iOS 13.0, macOS 10.15, *)
@@ -205,6 +209,10 @@ extension CameraService {
         let fileName = UUID().uuidString
         let filePath = directoryPath.appendingPathComponent(fileName).appendingPathExtension("mp4")
         movieFileOutput.startRecording(to: filePath, recordingDelegate: self)
+
+        // Play system sound for recording start
+        playRecordingStartSound()
+
         print("Video recording started to: \(filePath.path)")
     }
 
@@ -235,6 +243,10 @@ extension CameraService {
         // User can turn it off manually via flash button if desired
 
         movieFileOutput.stopRecording()
+
+        // Play system sound for recording stop
+        playRecordingStopSound()
+
         print("Video recording stopped")
     }
 
@@ -282,6 +294,28 @@ extension CameraService {
             // For video mode, activate/deactivate torch immediately (like iPhone Camera app)
             updateTorchForVideoMode()
         }
+    }
+
+    /// Plays the system default sound for video recording start.
+    ///
+    /// This provides audio feedback when video recording begins,
+    /// following standard iOS camera app UX patterns.
+    private func playRecordingStartSound() {
+        #if os(iOS)
+        // Use system sound for recording start (usually a short beep)
+        AudioServicesPlaySystemSound(1113)  // Standard iOS camera recording start sound
+        #endif
+    }
+
+    /// Plays the system default sound for video recording end.
+    ///
+    /// This provides audio feedback when video recording stops,
+    /// following standard iOS camera app UX patterns.
+    private func playRecordingStopSound() {
+        #if os(iOS)
+        // Use system sound for recording stop (usually a different tone)
+        AudioServicesPlaySystemSound(1114)  // Standard iOS camera recording stop sound
+        #endif
     }
 
     /// Updates torch state based on current capture mode and settings.
@@ -386,7 +420,25 @@ extension CameraService {
 // MARK: - Private Properties for Capture
 @available(iOS 13.0, macOS 10.15, *)
 extension CameraService {
-    // Store continuation for photo capture
+    /// Associated object storage for photo capture continuation.
+    ///
+    /// This property bridges Swift concurrency with AVFoundation's delegate-based API.
+    /// When `capturePhoto()` is called, it creates a `CheckedContinuation` that needs to be
+    /// resumed later when the delegate method `photoOutput(_:didFinishProcessingPhoto:error:)`
+    /// is called. Since `CameraService` is a final class and we can't add stored properties,
+    /// we use Objective-C associated objects to store the continuation temporarily.
+    ///
+    /// The continuation is set in `capturePhoto()` and resumed in the delegate methods.
+    /// It's automatically cleaned up after use and during `cleanupCamera()`.
+    ///
+    /// This pattern is necessary because:
+    /// - AVFoundation uses asynchronous delegates, not completion handlers
+    /// - Swift concurrency requires bridging to resume async operations
+    /// - Associated objects provide thread-safe storage without modifying the class
+    ///
+    /// Thread Safety: Associated objects are thread-safe and handle the sessionQueue context properly.
+    ///
+    /// - Note: I am not entirely confident of this approach and if you have a better implementation you are encouraged to send a PR
     var photoCaptureContinuation: CheckedContinuation<URL?, Never>? {
         get {
             objc_getAssociatedObject(self, &photoCaptureContinuationKey) as? CheckedContinuation<URL?, Never>

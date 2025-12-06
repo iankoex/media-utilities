@@ -69,10 +69,11 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
     let captureSession = AVCaptureSession()
     var isCaptureSessionConfigured = false
     var deviceInput: AVCaptureDeviceInput?
+    var audioInput: AVCaptureDeviceInput?
     var photoOutput: AVCapturePhotoOutput?
     var movieFileOutput: AVCaptureMovieFileOutput?
     var videoOutput: AVCaptureVideoDataOutput?
-    var sessionQueue: DispatchQueue!
+    let sessionQueue: DispatchQueue
 
     // MARK: - Public Observable Properties
 
@@ -100,6 +101,7 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
     var photoFlashMode: AVCaptureDevice.FlashMode = .off
 
     /// Torch mode for video recording (preserved when switching modes).
+    /// Helper to have the same functionality instead of having a different implementation for TorchMode
     var videoTorchMode: AVCaptureDevice.FlashMode = .off
 
     /// Indicates whether a photo capture operation is currently in progress.
@@ -124,6 +126,12 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
         didSet {
             updateTorchForCurrentMode()
         }
+    }
+
+    // MARK: - Audio Device Properties
+
+    private var audioDevice: AVCaptureDevice? {
+        return AVCaptureDevice.default(for: .audio)
     }
 
     // MARK: - Device Properties
@@ -374,10 +382,11 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
     // MARK: - Initialization
 
     public override init() {
+        sessionQueue = DispatchQueue(label: "MediaUtilities.CameraService.sessionQueue")
         super.init()
 
         captureSession.sessionPreset = .photo
-        sessionQueue = DispatchQueue(label: "MediaUtilities.CameraService.sessionQueue")
+
         captureDevice = availableCaptureDevices.first ?? AVCaptureDevice.default(for: .video)
     }
 
@@ -409,6 +418,16 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
             if !captureSession.inputs.contains(deviceInput), captureSession.canAddInput(deviceInput) {
                 captureSession.addInput(deviceInput)
             }
+        }
+
+        // Re-add audio input if available
+        if let audioDevice = audioDevice,
+            let audioInput = try? AVCaptureDeviceInput(device: audioDevice),
+            !captureSession.inputs.contains(audioInput),
+            captureSession.canAddInput(audioInput)
+        {
+            captureSession.addInput(audioInput)
+            self.audioInput = audioInput
         }
 
         // Reset zoom factor to 1.0 for consistent default zoom
@@ -473,6 +492,19 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
         }
 
         captureSession.addInput(deviceInput)
+
+        // Add audio input for video recording with audio
+        if let audioDevice = audioDevice,
+            let audioInput = try? AVCaptureDeviceInput(device: audioDevice),
+            captureSession.canAddInput(audioInput)
+        {
+            captureSession.addInput(audioInput)
+            self.audioInput = audioInput
+            print("Audio input added to capture session")
+        } else {
+            print("Audio input not available or cannot be added")
+        }
+
         captureSession.addOutput(photoOutput)
         captureSession.addOutput(videoOutput)
         captureSession.addOutput(movieFileOutput)
