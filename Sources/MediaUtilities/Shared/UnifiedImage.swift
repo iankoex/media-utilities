@@ -22,12 +22,6 @@ import SwiftUI
 /// // Create a SwiftUI Image from UnifiedImage
 /// let swiftUIImage = Image(unifiedImage: myUnifiedImage)
 ///
-/// // Access platform-specific properties
-/// #if os(iOS)
-/// let uiImage = myUnifiedImage as UIImage
-/// #else
-/// let nsImage = myUnifiedImage as NSImage
-/// #endif
 /// ```
 ///
 /// ## Platform Availability
@@ -68,7 +62,7 @@ extension UIImage {
     ///
     /// - Note: The output image will be square with the diameter equal to the smaller
     ///   dimension of the input image.
-    func cropToCircle() -> UIImage? {
+    public func cropToCircle() -> UIImage? {
         let imageSize = self.size
         let diameter = min(imageSize.width, imageSize.height)
         let circleRect = CGRect(x: 0, y: 0, width: diameter, height: diameter)
@@ -104,7 +98,7 @@ extension UIImage {
     /// - Returns: A new `UIImage` with corrected orientation, or `nil` if correction fails
     ///
     /// - Note: If the image is already oriented correctly (`.up`), returns the original image.
-    var withCorrectOrientation: UIImage? {
+    public var withCorrectOrientation: UIImage? {
         if imageOrientation == .up { return self }
         
         UIGraphicsBeginImageContextWithOptions(size, false, scale)
@@ -158,7 +152,7 @@ extension NSImage {
     /// for Core Graphics operations and cross-platform compatibility.
     ///
     /// - Returns: The CGImage representation, or `nil` if conversion fails
-    var cgImage: CGImage? {
+    public var cgImage: CGImage? {
         var rect = NSRect(origin: CGPoint(x: 0, y: 0), size: self.size)
         return self.cgImage(forProposedRect: &rect, context: NSGraphicsContext.current, hints: nil)
     }
@@ -175,7 +169,7 @@ extension NSImage {
     ///
     /// - Note: The output image will be square with the diameter equal to the smaller
     ///   dimension of the input image.
-    func cropToCircle() -> NSImage? {
+    public func cropToCircle() -> NSImage? {
         let imageSize = self.size
         let diameter = min(imageSize.width, imageSize.height)
         let circleRect = NSRect(x: 0, y: 0, width: diameter, height: diameter)
@@ -209,7 +203,7 @@ extension NSImage {
     ///
     /// - Note: macOS handles image orientation differently than iOS, so this property
     ///   usually returns the original image unchanged.
-    var withCorrectOrientation: NSImage? {
+    public var withCorrectOrientation: NSImage? {
         return self
     }
 }
