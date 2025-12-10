@@ -73,6 +73,7 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
     var movieFileOutput: AVCaptureMovieFileOutput?
     var videoOutput: AVCaptureVideoDataOutput?
     let sessionQueue: DispatchQueue
+    let allowedCaptureModes: Set<CaptureMode>
 
     // MARK: - Public Observable Properties
 
@@ -302,9 +303,8 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
     /// Returns `false` if either camera or microphone access has not been granted.
     /// This is useful for checking if video recording with audio is possible.
     public var isCameraAndMicrophoneAvailable: Bool {
-        authorizationStatus == .authorized &&
-        microphoneAuthorizationStatus == .authorized &&
-        !availableCaptureDevices.isEmpty
+        authorizationStatus == .authorized && microphoneAuthorizationStatus == .authorized
+            && !availableCaptureDevices.isEmpty
     }
 
     // MARK: - Async Streams
@@ -387,8 +387,12 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
 
     // MARK: - Initialization
 
-    public override init() {
+    public init(
+        allowedCaptureModes: Set<CaptureMode>
+    ) {
         sessionQueue = DispatchQueue(label: "MediaUtilities.CameraService.sessionQueue")
+        self._captureMode = .init(initialValue: allowedCaptureModes.first ?? .photo)
+        self.allowedCaptureModes = allowedCaptureModes
         super.init()
 
         captureSession.sessionPreset = .photo

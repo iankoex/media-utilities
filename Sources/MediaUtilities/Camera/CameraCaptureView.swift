@@ -24,7 +24,9 @@ import SwiftUI
 /// ## Usage
 ///
 /// ```swift
-/// CameraCaptureView { result in
+/// CameraCaptureView(
+///     allowedCaptureModes: [.photo, .video]
+/// ) { result in
 ///     switch result {
 ///     case .success(let url):
 ///         // Handle captured media
@@ -43,7 +45,7 @@ import SwiftUI
 /// - Some features (like flash) are iOS-only
 @available(iOS 14.0, macOS 11.0, *)
 public struct CameraCaptureView: View {
-    @StateObject private var cameraService = CameraService()
+    @StateObject private var cameraService = CameraService(allowedCaptureModes: [.photo])
     @State private var isRecording = false
     @State private var showingPermissionAlert = false
 
@@ -63,9 +65,17 @@ public struct CameraCaptureView: View {
     /// This initializer sets up the camera interface with the specified completion handler
     /// that will be called when photos are captured or videos finish recording.
     ///
-    /// - Parameter onCapture: A closure that handles the result of capture operations.
-    public init(onCapture: @escaping (Result<URL, CameraError>) -> Void) {
+    /// - Parameters:
+    ///   - allowedCaptureModes: A set of capture modes that should be available in the camera interface.
+    ///     Defaults to `[.photo, .video]` to allow both photo and video capture.
+    ///     Use `[.photo]` to restrict to photo-only or `[.video]` for video-only.
+    ///   - onCapture: A closure that handles the result of capture operations.
+    public init(
+        allowedCaptureModes: Set<CaptureMode> = [.photo, .video],
+        onCapture: @escaping (Result<URL, CameraError>) -> Void
+    ) {
         self.onCapture = onCapture
+        self._cameraService = StateObject(wrappedValue: CameraService(allowedCaptureModes: allowedCaptureModes))
     }
 
     public var body: some View {
@@ -124,7 +134,7 @@ public struct CameraCaptureView: View {
         .overlay {
             if cameraService.movieFileOutput?.isRecording ?? false {
                 RecordingTimeView(time: cameraService.movieFileOutput?.recordedDuration.seconds ?? 0)
-            } else {
+            } else if cameraService.allowedCaptureModes.count > 1 {
                 modeSelector
                     .frame(maxWidth: 100)
             }
@@ -161,7 +171,7 @@ public struct CameraCaptureView: View {
 
     private var modeSelector: some View {
         Picker("Capture Mode", selection: $cameraService.captureMode) {
-            ForEach(CaptureMode.allCases, id: \.self) { mode in
+            ForEach(cameraService.allowedCaptureModes.map({ $0 }), id: \.self) { mode in
                 Label(mode.rawValue, systemImage: mode.systemImage)
                     .labelStyle(.iconOnly)
                     .tag(mode)

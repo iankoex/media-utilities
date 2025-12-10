@@ -95,7 +95,10 @@ struct CameraView: View {
                 showCamera = true
             }
         }
-        .cameraCapture(isPresented: $showCamera) { result in
+        .cameraCapture(
+            isPresented: $showCamera,
+            allowedCaptureModes: [.photo, .video]
+        ) { result in
             switch result {
             case .success(let url):
                 print("Media captured: \(url)")
@@ -115,7 +118,7 @@ For advanced camera control and custom implementations.
 import MediaUtilities
 
 class CameraManager {
-    private let cameraService = CameraService()
+    private let cameraService = CameraService(allowedCaptureModes: [.photo, .video])
 
     func setupCamera() async {
         // Initialize camera
@@ -151,6 +154,7 @@ class CameraManager {
 
 - **Live Preview**: Real-time camera preview with pause/resume controls
 - **Photo/Video Capture**: Switch between photo and video recording modes
+- **Allowed Capture Modes**: Configure which capture modes (photo/video) are available via `allowedCaptureModes` parameter
 - **Flash Control**: Automatic flash mode cycling (off/auto/on)
 - **Camera Switching**: Toggle between front and back cameras
 - **Permission Handling**: Automatic camera access request and status checking
