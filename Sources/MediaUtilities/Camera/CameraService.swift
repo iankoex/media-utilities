@@ -395,8 +395,7 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
         self.allowedCaptureModes = allowedCaptureModes
         super.init()
 
-        captureSession.sessionPreset = .photo
-
+        captureSession.sessionPreset = .high
         captureDevice = availableCaptureDevices.first ?? AVCaptureDevice.default(for: .video)
     }
 }

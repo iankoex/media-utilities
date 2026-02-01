@@ -171,13 +171,14 @@ public struct CameraCaptureView: View {
 
     private var modeSelector: some View {
         Picker("Capture Mode", selection: $cameraService.captureMode) {
-            ForEach(cameraService.allowedCaptureModes.map({ $0 }), id: \.self) { mode in
+            ForEach(cameraService.allowedCaptureModes.map({ $0 }).sorted(by: { $0.rawValue < $1.rawValue })) { mode in
                 Label(mode.rawValue, systemImage: mode.systemImage)
                     .labelStyle(.iconOnly)
                     .tag(mode)
             }
         }
         .pickerStyle(.segmented)
+        .disabled(cameraService.previewImage == nil)
     }
 
     // MARK: - Flash Button

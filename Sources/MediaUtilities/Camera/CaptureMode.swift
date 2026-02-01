@@ -15,7 +15,7 @@ import Foundation
 /// configured for photo capture or video recording. This enum
 /// is used to switch between different capture functionalities
 /// and update the UI accordingly.
-public enum CaptureMode: String, CaseIterable {
+public enum CaptureMode: String, CaseIterable, Identifiable {
     /// Photo capture mode for taking still images.
     case photo = "photo"
 
@@ -35,6 +35,10 @@ public enum CaptureMode: String, CaseIterable {
             case .video:
                 return "video"
         }
+    }
+
+    public var id: String {
+        self.rawValue
     }
 }
 
