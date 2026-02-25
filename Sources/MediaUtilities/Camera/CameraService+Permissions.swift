@@ -35,10 +35,15 @@ extension CameraService {
     @concurrent
     public func requestCameraAccess() async {
         // Request both video and audio permissions concurrently
-        async let videoPermission = AVCaptureDevice.requestAccess(for: .video)
-        async let audioPermission = AVCaptureDevice.requestAccess(for: .audio)
+        if allowedCaptureModes.contains(.video) {
+            async let videoPermission = AVCaptureDevice.requestAccess(for: .video)
+            async let audioPermission = AVCaptureDevice.requestAccess(for: .audio)
 
-        // Wait for both permission requests to complete
-        _ = await (videoPermission, audioPermission)
+            // Wait for both permission requests to complete
+            _ = await (videoPermission, audioPermission)
+        } else {
+            // just ask for video permission audio is not needed for photos
+            await AVCaptureDevice.requestAccess(for: .video)
+        }
     }
 }
