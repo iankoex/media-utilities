@@ -47,8 +47,9 @@ extension CameraService {
             }
         }
 
-        // Re-add audio input if available
-        if let audioDevice = audioDevice,
+        // Re-add audio input only if video mode is allowed
+        if allowedCaptureModes.contains(.video),
+            let audioDevice = audioDevice,
             let audioInput = try? AVCaptureDeviceInput(device: audioDevice),
             !captureSession.inputs.contains(audioInput),
             captureSession.canAddInput(audioInput)
@@ -116,8 +117,9 @@ extension CameraService {
 
         captureSession.addInput(deviceInput)
 
-        // Add audio input for video recording with audio
-        if let audioDevice = audioDevice,
+        // Add audio input only if video mode is allowed
+        if allowedCaptureModes.contains(.video),
+            let audioDevice = audioDevice,
             let audioInput = try? AVCaptureDeviceInput(device: audioDevice),
             captureSession.canAddInput(audioInput)
         {
