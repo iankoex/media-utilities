@@ -15,6 +15,10 @@ extension CameraService {
 
     @concurrent
     func handleCameraPreviews() async {
+        guard !isPreviewRunning else { return }
+        isPreviewRunning = true
+        defer { isPreviewRunning = false }
+
         let imageStream = previewStream.map { $0.image }
 
         for await image in imageStream {
@@ -112,6 +116,9 @@ extension CameraService {
             return
         }
         guard captureSession.canAddOutput(videoOutput) else {
+            return
+        }
+        guard captureSession.canAddOutput(movieFileOutput) else {
             return
         }
 

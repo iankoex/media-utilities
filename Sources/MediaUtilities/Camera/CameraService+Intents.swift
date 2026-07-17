@@ -100,7 +100,9 @@ extension CameraService {
 
         // Ensure session is running
         if !isRunning {
-            await start()
+            guard await start() else {
+                return .failure(.configurationFailed)
+            }
         }
 
         await MainActor.run {
@@ -108,6 +110,9 @@ extension CameraService {
         }
 
         guard let photoURL = await capturePhoto() else {
+            await MainActor.run {
+                isCapturingPhoto = false
+            }
             return .failure(.captureFailed)
         }
 
@@ -121,12 +126,12 @@ extension CameraService {
     ///
     /// This method provides a safe way to start video recording with automatic
     /// permission checking, camera availability validation, and proper error handling.
-    /// The recording continues until `stopRecordingVideo()` is called.
+    /// The recording continues until `stopVideoRecording()` is called.
     ///
     /// ## Usage
     ///
     /// ```swift
-    /// let result = cameraService.startVideoRecording()
+    /// let result = await cameraService.startVideoRecording()
     /// switch result {
     /// case .success:
     ///     print("Recording started")
@@ -136,11 +141,21 @@ extension CameraService {
     /// ```
     ///
     /// - Returns: `Result<Void, CameraError>` indicating success or failure.
-    /// - Note: Use `movieFileStream` to receive the completed video URL.
-    public func startVideoRecording() -> Result<Void, CameraError> {
+    /// - Note: Use `stopVideoRecording()` to stop and receive the completed video URL.
+    public func startVideoRecording() async -> Result<Void, CameraError> {
         // Check permissions first
         guard authorizationStatus == .authorized else {
             return .failure(.permissionDenied)
+        }
+
+        // Prevent concurrent recording starts
+        if videoRecordingContinuation != nil {
+            return .failure(.recordingFailed)
+        }
+
+        // Lazily request audio permission if not yet determined
+        if microphoneAuthorizationStatus == .notDetermined {
+            await AVCaptureDevice.requestAccess(for: .audio)
         }
 
         guard microphoneAuthorizationStatus == .authorized else {
@@ -152,10 +167,10 @@ extension CameraService {
             return .failure(.deviceNotAvailable)
         }
 
-        // Ensure session is running
+        // Ensure session is running - await properly to avoid race
         if !isRunning {
-            Task {
-                await start()
+            guard await start() else {
+                return .failure(.configurationFailed)
             }
         }
 
@@ -186,10 +201,23 @@ extension CameraService {
     /// - Note: This method should only be called after `startVideoRecording()` succeeds.
     @concurrent
     public func stopVideoRecording() async -> Result<URL, CameraError> {
-        // This will be called when recording delegate finishes
-        // For now, we'll return a placeholder result
-        // The actual URL will come through the movieFileStream
-        return .success(URL(fileURLWithPath: "placeholder"))
+        return await withCheckedContinuation { continuation in
+            sessionQueue.async { [self] in
+                guard videoRecordingContinuation == nil else {
+                    continuation.resume(returning: .failure(.recordingFailed))
+                    return
+                }
+
+                guard let movieFileOutput = self.movieFileOutput, movieFileOutput.isRecording else {
+                    continuation.resume(returning: .failure(.recordingFailed))
+                    return
+                }
+
+                videoRecordingContinuation = continuation
+                movieFileOutput.stopRecording()
+                playRecordingStopSound()
+            }
+        }
     }
 
     /// Initializes the camera service for use with comprehensive setup.
@@ -213,6 +241,9 @@ extension CameraService {
     /// - Returns: `Result<Void, CameraError>` indicating initialization success or failure.
     /// - Note: After successful initialization, preview frames are available via `previewStream`.
     public func initializeCamera() async -> Result<Void, CameraError> {
+        // Clear any previous session error
+        await MainActor.run { sessionError = nil }
+
         if authorizationStatus == .notDetermined {
             await requestCameraAccess()
         }
@@ -226,9 +257,13 @@ extension CameraService {
         // Setup session observers
         setupSessionObservers()
 
-        // Start session
-        await start()
-        await handleCameraPreviews()
+        // Start session and wait for it to be running
+        guard await start() else {
+            return .failure(.configurationFailed)
+        }
+
+        // Run preview loop detached so initializeCamera() can return
+        Task { await handleCameraPreviews() }
 
         return .success(())
     }
@@ -251,6 +286,14 @@ extension CameraService {
         stop()
         removeSessionObservers()
 
+        // Finish old streams so consumers terminate
+        photoContinuation?.finish()
+        movieContinuation?.finish()
+        previewContinuation?.finish()
+
+        // Recreate streams for potential re-initialization
+        createStreams()
+
         // Reset all state variables for clean initialization
         isCaptureSessionConfigured = false
         captureDevice = nil
@@ -268,16 +311,20 @@ extension CameraService {
         // Reset other state
         isCapturingPhoto = false
         isPreviewPaused = false
+        isPreviewRunning = false
+        isSessionInterrupted = false
+        sessionError = nil
         previewImage = nil
 
-        // Clear async stream continuations
-        addToPhotoStream = nil
-        addToMovieFileStream = nil
-        addToPreviewStream = nil
+        // Clear continuations on sessionQueue to serialize with delegate callbacks
+        // (AVCapturePhotoOutput and AVCaptureFileOutput delegates fire on sessionQueue)
+        sessionQueue.async { [self] in
+            photoCaptureContinuation?.resume(returning: nil)
+            photoCaptureContinuation = nil
 
-        // Clear photo capture continuation
-        photoCaptureContinuation = nil
-
+            videoRecordingContinuation?.resume(returning: .failure(.userCancelled))
+            videoRecordingContinuation = nil
+        }
     }
 
     /// Returns comprehensive information about current camera state and capabilities.

@@ -31,7 +31,7 @@ import SwiftUI
 /// ## Usage
 ///
 /// ```swift
-/// let cameraService = CameraService()
+/// let cameraService = CameraService(allowedCaptureModes: [.photo, .video])
 /// await cameraService.initializeCamera()
 ///
 /// let result = await cameraService.capturePhotoWithCompletion()
@@ -40,11 +40,6 @@ import SwiftUI
 ///     print("Photo saved to: \(url)")
 /// case .failure(let error):
 ///     print("Capture failed: \(error)")
-/// }
-///
-/// // Monitor live preview
-/// for await ciImage in cameraService.previewStream {
-///     // Process preview frames
 /// }
 /// ```
 ///
@@ -127,6 +122,14 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
             updateTorchForCurrentMode()
         }
     }
+
+    /// Indicates whether the camera session is currently interrupted
+    /// (e.g., by a phone call or another app using the camera).
+    @Published public var isSessionInterrupted = false
+
+    /// The last session-level error (e.g., camera disconnected).
+    /// Set automatically by runtime error handlers. Cleared on initialization and cleanup.
+    @Published public var sessionError: CameraError?
 
     // MARK: - Audio Device Properties
 
@@ -309,80 +312,54 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
 
     // MARK: - Async Streams
 
-    var addToPhotoStream: ((AVCapturePhoto) -> Void)?
-
-    /// An async stream that delivers captured photos as they become available.
-    ///
-    /// This stream provides `AVCapturePhoto` objects as they are captured by the camera.
-    /// Use this stream for real-time photo processing or to build custom photo handling logic.
-    /// The stream continues until the camera service is deallocated.
-    ///
-    /// ## Usage
-    ///
-    /// ```swift
-    /// for await photo in cameraService.photoStream {
-    ///     // Process captured photo
-    ///     print("Photo captured: \(photo)")
-    /// }
-    /// ```
-    var photoStream: AsyncStream<AVCapturePhoto> {
-        AsyncStream { continuation in
-            addToPhotoStream = { photo in
-                continuation.yield(photo)
-            }
-        }
-    }
-
-    var addToMovieFileStream: ((URL) -> Void)?
-
-    /// An async stream that delivers URLs of completed video recordings.
-    ///
-    /// This stream provides local file URLs for videos as they finish recording.
-    /// Each URL points to a video file stored in the device's documents directory.
-    /// The stream continues until the camera service is deallocated.
-    ///
-    /// ## Usage
-    ///
-    /// ```swift
-    /// for await videoURL in cameraService.movieFileStream {
-    ///     // Handle completed video recording
-    ///     print("Video saved to: \(videoURL)")
-    /// }
-    /// ```
-    public var movieFileStream: AsyncStream<URL> {
-        AsyncStream { continuation in
-            addToMovieFileStream = { fileUrl in
-                continuation.yield(fileUrl)
-            }
-        }
-    }
-
-    var addToPreviewStream: ((CIImage) -> Void)?
+    var previewContinuation: AsyncStream<CIImage>.Continuation?
 
     /// An async stream that delivers live camera preview frames.
     ///
-    /// This stream provides `CIImage` objects representing the current camera preview
-    /// at approximately 30 FPS. Frames are only delivered when `isPreviewPaused` is `false`.
-    /// Use this stream for custom preview processing or computer vision tasks.
+    /// Provides `CIImage` objects at approximately 30 FPS.
+    /// Use `previewStream.map { $0.image }` to convert to SwiftUI `Image`.
+    /// The stream is recreated on `cleanupCamera()` and is safe for re-initialization.
+    private(set) var previewStream: AsyncStream<CIImage>!
+
+    var photoContinuation: AsyncStream<AVCapturePhoto>.Continuation?
+
+    /// An async stream that delivers captured photos as they become available.
     ///
-    /// ## Usage
+    /// Provides `AVCapturePhoto` objects after each successful capture.
+    /// The stream is recreated on `cleanupCamera()` and is safe for re-initialization.
+    private(set) var photoStream: AsyncStream<AVCapturePhoto>!
+
+    var movieContinuation: AsyncStream<URL>.Continuation?
+
+    /// An async stream that delivers URLs of completed video recordings.
     ///
-    /// ```swift
-    /// for await ciImage in cameraService.previewStream {
-    ///     // Process preview frame
-    ///     let uiImage = UIImage(ciImage: ciImage)
-    /// }
-    /// ```
-    ///
-    /// - Note: Preview frames are delivered on a background queue. Update UI on main thread.
-    public var previewStream: AsyncStream<CIImage> {
-        AsyncStream { continuation in
-            addToPreviewStream = { ciImage in
-                if !self.isPreviewPaused {
-                    continuation.yield(ciImage)
-                }
-            }
-        }
+    /// Each URL points to a video file in the device's documents directory.
+    /// The stream is recreated on `cleanupCamera()` and is safe for re-initialization.
+    public private(set) var movieFileStream: AsyncStream<URL>!
+
+    // MARK: - Continuations
+
+    var photoCaptureContinuation: CheckedContinuation<URL?, Never>?
+    var videoRecordingContinuation: CheckedContinuation<Result<URL, CameraError>, Never>?
+
+    // MARK: - Preview Guard
+
+    var isPreviewRunning = false
+
+    // MARK: - Stream Creation
+
+    func createStreams() {
+        var pc: AsyncStream<CIImage>.Continuation!
+        previewStream = AsyncStream { pc = $0 }
+        previewContinuation = pc
+
+        var phc: AsyncStream<AVCapturePhoto>.Continuation!
+        photoStream = AsyncStream { phc = $0 }
+        photoContinuation = phc
+
+        var mc: AsyncStream<URL>.Continuation!
+        movieFileStream = AsyncStream { mc = $0 }
+        movieContinuation = mc
     }
 
     // MARK: - Initialization
@@ -393,9 +370,20 @@ public final class CameraService: NSObject, ObservableObject, Sendable {
         sessionQueue = DispatchQueue(label: "MediaUtilities.CameraService.sessionQueue")
         self._captureMode = .init(initialValue: allowedCaptureModes.first ?? .photo)
         self.allowedCaptureModes = allowedCaptureModes
+
         super.init()
+
+        createStreams()
 
         captureSession.sessionPreset = .high
         captureDevice = availableCaptureDevices.first ?? AVCaptureDevice.default(for: .video)
+    }
+
+    deinit {
+        photoCaptureContinuation?.resume(returning: nil)
+        videoRecordingContinuation?.resume(returning: .failure(.unknown("Camera service deallocated")))
+        photoContinuation?.finish()
+        movieContinuation?.finish()
+        previewContinuation?.finish()
     }
 }

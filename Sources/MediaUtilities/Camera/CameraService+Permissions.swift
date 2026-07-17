@@ -32,6 +32,7 @@ extension CameraService {
     /// ```
     ///
     /// - Note: This method should be called before attempting to use camera features that require audio.
+    ///   If audio permission was not requested here, `startVideoRecording()` will lazily request it when needed.
     @concurrent
     public func requestCameraAccess() async {
         // Request both video and audio permissions concurrently

@@ -29,12 +29,14 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
     ) {
         if error != nil {
             photoCaptureContinuation?.resume(returning: nil)
+            photoCaptureContinuation = nil
             return
         }
 
         // Process photo data and save to temporary file
         guard let imageData = photo.fileDataRepresentation() else {
             photoCaptureContinuation?.resume(returning: nil)
+            photoCaptureContinuation = nil
             return
         }
 
@@ -46,10 +48,12 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
             try imageData.write(to: tempURL)
 
             // Add to stream and resume continuation
-            addToPhotoStream?(photo)
+            photoContinuation?.yield(photo)
             photoCaptureContinuation?.resume(returning: tempURL)
+            photoCaptureContinuation = nil
         } catch {
             photoCaptureContinuation?.resume(returning: nil)
+            photoCaptureContinuation = nil
         }
     }
 }
@@ -75,11 +79,15 @@ extension CameraService: AVCaptureFileOutputRecordingDelegate {
         from connections: [AVCaptureConnection],
         error: Error?
     ) {
-        if error != nil {
+        if let error = error {
+            videoRecordingContinuation?.resume(returning: .failure(.recordingFailed))
+            videoRecordingContinuation = nil
             return
         }
 
-        addToMovieFileStream?(outputFileURL)
+        movieContinuation?.yield(outputFileURL)
+        videoRecordingContinuation?.resume(returning: .success(outputFileURL))
+        videoRecordingContinuation = nil
     }
 }
 
@@ -111,9 +119,11 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
             // Fallback on earlier versions
         }
 
-        // Create CIImage and add to preview stream
+        // Create CIImage and add to preview stream (respecting pause state)
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        addToPreviewStream?(ciImage)
+        if !isPreviewPaused {
+            previewContinuation?.yield(ciImage)
+        }
     }
 }
 
@@ -169,8 +179,13 @@ extension CameraService {
         }
 
         if error.code == .deviceNotConnected {
-            // Camera disconnected
+            Task { @MainActor in
+                sessionError = .deviceNotAvailable
+            }
         } else if error.code == .mediaServicesWereReset {
+            Task { @MainActor in
+                sessionError = .unknown("Camera system was reset. Restarting...")
+            }
             Task {
                 await start()
             }
@@ -187,6 +202,10 @@ extension CameraService {
             return
         }
 
+        Task { @MainActor in
+            isSessionInterrupted = true
+        }
+
         if reason == .audioDeviceInUseByAnotherClient || reason == .videoDeviceInUseByAnotherClient {
             // Camera is being used by another app
         }
@@ -194,6 +213,10 @@ extension CameraService {
     }
 
     @objc private func sessionInterruptionEnded(_ notification: Notification) {
+        Task { @MainActor in
+            isSessionInterrupted = false
+        }
+
         if !captureSession.isRunning && isCaptureSessionConfigured {
             Task {
                 await start()

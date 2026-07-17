@@ -49,6 +49,7 @@ public struct CameraCaptureView: View {
     @State private var isRecording = false
     @State private var showingPermissionAlert = false
 
+
     /// Callback closure that handles the result of camera capture operations.
     ///
     /// This closure is called when a photo is captured or video recording completes.
@@ -94,6 +95,12 @@ public struct CameraCaptureView: View {
             } message: {
                 Text("Please enable camera access in Settings to use this feature.")
             }
+            .onChange(of: cameraService.sessionError) { error in
+                if let error = error {
+                    cameraService.sessionError = nil
+                    onCapture(.failure(error))
+                }
+            }
                 #endif
         } else {
             viewBody
@@ -105,6 +112,23 @@ public struct CameraCaptureView: View {
             cameraService.previewImage?
                 .resizable()
                 .aspectRatio(contentMode: .fit)
+
+            // Interruption overlay
+            if cameraService.isSessionInterrupted {
+                Color.black.opacity(0.6)
+                    .ignoresSafeArea(.all)
+                VStack(spacing: 12) {
+                    Image(systemName: "video.slash.fill")
+                        .font(.largeTitle)
+                    Text("Camera Unavailable")
+                        .font(.title2.weight(.semibold))
+                    Text("Another app may be using the camera.")
+                        .font(.subheadline)
+                }
+                .foregroundColor(.white)
+                .multilineTextAlignment(.center)
+                .padding(40)
+            }
 
             VStack {
                 topControls
@@ -335,31 +359,36 @@ public struct CameraCaptureView: View {
     }
 
     private func startVideoRecording() {
-        let result = cameraService.startVideoRecording()
+        Task {
+            let result = await cameraService.startVideoRecording()
 
-        switch result {
-            case .success:
-                withAnimation {
-                    isRecording = true
+            await MainActor.run {
+                switch result {
+                    case .success:
+                        withAnimation {
+                            isRecording = true
+                        }
+                    case .failure(let error):
+                        onCapture(.failure(error))
                 }
-            case .failure(let error):
-                onCapture(.failure(error))
+            }
         }
     }
 
     private func stopVideoRecording() {
-        cameraService.stopRecordingVideo()
-
-        // Listen for video file completion
         Task {
-            for await url in cameraService.movieFileStream {
-                await MainActor.run {
-                    withAnimation {
-                        isRecording = false
-                    }
-                    onCapture(.success(url))
+            let result = await cameraService.stopVideoRecording()
+
+            await MainActor.run {
+                withAnimation {
+                    isRecording = false
                 }
-                break
+                switch result {
+                    case .success(let url):
+                        onCapture(.success(url))
+                    case .failure(let error):
+                        onCapture(.failure(error))
+                }
             }
         }
     }

@@ -23,34 +23,34 @@ extension CameraService {
     /// checks for camera permissions, and starts the session.
     /// Preview frames will begin flowing through the `previewStream` after this call.
     ///
-    /// ## Usage
     ///
     /// ```swift
-    /// await cameraService.start()
-    /// // Preview frames are now available via previewStream
+    /// let started = await cameraService.start()
+    /// if started {
+    ///     // Preview frames are now available via previewStream
+    /// }
     /// ```
     ///
-    /// - Note: This method is a no-op if the session is already running.
-    public func start() async {
-        guard authorizationStatus == .authorized else {
-            return
-        }
+    /// - Returns: `true` if the session started successfully, `false` otherwise.
+    /// - Note: All session mutations happen on `sessionQueue` to prevent races with `stop()`.
+    public func start() async -> Bool {
+        guard authorizationStatus == .authorized else { return false }
 
-        if isCaptureSessionConfigured {
-            if !captureSession.isRunning {
-                sessionQueue.async { [self] in
-                    self.captureSession.startRunning()
+        return await withCheckedContinuation { continuation in
+            sessionQueue.async { [self] in
+                if isCaptureSessionConfigured {
+                    if !captureSession.isRunning {
+                        captureSession.startRunning()
+                    }
+                    continuation.resume(returning: true)
+                } else {
+                    configureCaptureSession { success in
+                        if success {
+                            self.captureSession.startRunning()
+                        }
+                        continuation.resume(returning: success)
+                    }
                 }
-            }
-            return
-        }
-
-        sessionQueue.async { [self] in
-            self.configureCaptureSession { success in
-                guard success else {
-                    return
-                }
-                self.captureSession.startRunning()
             }
         }
     }
@@ -68,15 +68,13 @@ extension CameraService {
     /// // Preview frames stop flowing through previewStream
     /// ```
     ///
-    /// - Note: This method is a no-op if the session is not running.
+    /// - Note: The stop operation is dispatched to `sessionQueue` to ensure
+    ///   proper ordering with subsequent `start()` calls.
     public func stop() {
-        guard isCaptureSessionConfigured else {
-            return
-        }
-
-        if captureSession.isRunning {
-            sessionQueue.async { [self] in
-                self.captureSession.stopRunning()
+        guard isCaptureSessionConfigured else { return }
+        sessionQueue.async { [self] in
+            if captureSession.isRunning {
+                captureSession.stopRunning()
             }
         }
     }
@@ -118,7 +116,7 @@ extension CameraService {
     /// }
     /// ```
     ///
-    /// - Returns: URL to the captured photo file, or `nil` if capture failed.
+    /// - Returns: URL to the captured photo file, or `nil` if capture failed or a capture is already in progress.
     /// - Note: For user-friendly error handling, use `capturePhotoWithCompletion()` instead.
     @concurrent
     public func capturePhoto() async -> URL? {
@@ -128,6 +126,11 @@ extension CameraService {
 
         return await withCheckedContinuation { continuation in
             sessionQueue.async { [self] in
+                guard photoCaptureContinuation == nil else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+
                 var photoSettings = AVCapturePhotoSettings()
 
                 if photoOutput.availablePhotoCodecTypes.contains(.hevc) {
@@ -184,6 +187,10 @@ extension CameraService {
             return
         }
 
+        guard !movieFileOutput.isRecording else {
+            return
+        }
+
         guard
             let directoryPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         else {
@@ -223,6 +230,10 @@ extension CameraService {
             return
         }
 
+        guard movieFileOutput.isRecording else {
+            return
+        }
+
         // Torch state is preserved - don't turn it off automatically
         // User can turn it off manually via flash button if desired
 
@@ -242,14 +253,10 @@ extension CameraService {
     /// ## Usage
     ///
     /// ```swift
-    /// let success = cameraService.toggleFlashMode()
-    /// if success {
-    ///     print("Flash mode changed to: \(cameraService.flashMode)")
-    /// }
+    /// cameraService.toggleFlashMode()
+    /// print("Flash mode changed to: \(cameraService.flashMode)")
     /// ```
-    ///
-    /// - Returns: `true` if flash mode was successfully changed, `false` if flash is not available.
-    /// - Note: Flash is only available on iOS devices that support it.
+    /// 
     public func toggleFlashMode() {
         guard isFlashAvailable else {
             return
@@ -282,7 +289,7 @@ extension CameraService {
     ///
     /// This provides audio feedback when video recording begins,
     /// following standard iOS camera app UX patterns.
-    private func playRecordingStartSound() {
+    func playRecordingStartSound() {
         #if os(iOS)
         // Use system sound for recording start (usually a short beep)
         AudioServicesPlaySystemSound(1113)  // Standard iOS camera recording start sound
@@ -293,7 +300,7 @@ extension CameraService {
     ///
     /// This provides audio feedback when video recording stops,
     /// following standard iOS camera app UX patterns.
-    private func playRecordingStopSound() {
+    func playRecordingStopSound() {
         #if os(iOS)
         // Use system sound for recording stop (usually a different tone)
         AudioServicesPlaySystemSound(1114)  // Standard iOS camera recording stop sound
@@ -398,38 +405,3 @@ extension CameraService {
         }
     }
 }
-
-// MARK: - Private Properties for Capture
-@available(iOS 13.0, macOS 10.15, *)
-extension CameraService {
-    /// Associated object storage for photo capture continuation.
-    ///
-    /// This property bridges Swift concurrency with AVFoundation's delegate-based API.
-    /// When `capturePhoto()` is called, it creates a `CheckedContinuation` that needs to be
-    /// resumed later when the delegate method `photoOutput(_:didFinishProcessingPhoto:error:)`
-    /// is called. Since `CameraService` is a final class and we can't add stored properties,
-    /// we use Objective-C associated objects to store the continuation temporarily.
-    ///
-    /// The continuation is set in `capturePhoto()` and resumed in the delegate methods.
-    /// It's automatically cleaned up after use and during `cleanupCamera()`.
-    ///
-    /// This pattern is necessary because:
-    /// - AVFoundation uses asynchronous delegates, not completion handlers
-    /// - Swift concurrency requires bridging to resume async operations
-    /// - Associated objects provide thread-safe storage without modifying the class
-    ///
-    /// Thread Safety: Associated objects are thread-safe and handle the sessionQueue context properly.
-    ///
-    /// - Note: I am not entirely confident of this approach and if you have a better implementation you are encouraged to send a PR
-    var photoCaptureContinuation: CheckedContinuation<URL?, Never>? {
-        get {
-            objc_getAssociatedObject(self, &photoCaptureContinuationKey) as? CheckedContinuation<URL?, Never>
-        }
-        set {
-            objc_setAssociatedObject(self, &photoCaptureContinuationKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        }
-    }
-}
-
-// Associated object keys
-private var photoCaptureContinuationKey: UInt8 = 0
