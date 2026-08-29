@@ -180,6 +180,10 @@ public struct CameraCaptureView: View {
         .onDisappear {
             Task { await cameraService.cleanupCamera() }
         }
+        #if os(macOS)
+        .buttonStyle(.plain)
+        .frame(minHeight: 500)
+        #endif
     }
 
     // MARK: - Top Controls
@@ -231,69 +235,6 @@ public struct CameraCaptureView: View {
         .padding(.bottom, 20)
     }
 
-    // MARK: - Lens Button
-
-    /// Shown only when the active camera is a multi-lens (virtual) device —
-    /// dual and triple cameras — and the configuration enables the lens
-    /// switcher. Displays the current lens magnification (e.g. 1×); tapping
-    /// shuffles to the next available lens in ascending order (1× → 2× → 3×
-    /// → 0.5× → 1×).
-    @ViewBuilder
-    private var lensButton: some View {
-        if let label = currentLensLabel {
-            Button(action: {
-                Task {
-                    await cameraService.switchLens()
-                }
-            }) {
-                Text(label)
-                    .font(.system(size: lensLabelSize, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .grayBackgroundCircle()
-            }
-            .accessibilityLabel("Switch lens")
-            .modifier(LensInputLabels(label: label))
-            .disabled(!cameraService.isCameraAvailable || cameraService.isRecording)
-        }
-    }
-
-    /// The magnification label of the currently selected lens, or `nil` when
-    /// the active camera has fewer than two lenses.
-    private var currentLensLabel: String? {
-        guard cameraService.lensCount > 1,
-            cameraService.lensMagnifications.count == cameraService.lensCount,
-            cameraService.lensMagnifications.indices.contains(cameraService.selectedLensIndex)
-        else { return nil }
-
-        return lensLabel(for: cameraService.lensMagnifications[cameraService.selectedLensIndex])
-    }
-
-    /// Formats a lens magnification for display: whole numbers render without
-    /// decimals (1×, 3×), fractional ones keep a decimal (0.5×).
-    private func lensLabel(for factor: CGFloat) -> String {
-        let roundedToTenth = (factor * 10).rounded() / 10
-        let number =
-            roundedToTenth == roundedToTenth.rounded()
-            ? String(Int(roundedToTenth))
-            : String(format: "%.1f", roundedToTenth)
-        return number + "×"
-    }
-
-    /// Adds Voice Control input labels for the lens button (`accessibilityInputLabels`
-    /// requires iOS 15 / macOS 12).
-    private struct LensInputLabels: ViewModifier {
-        let label: String
-
-        func body(content: Content) -> some View {
-            if #available(iOS 15.0, macOS 12.0, *) {
-                content.accessibilityInputLabels(["Switch Lens", label])
-            } else {
-                content
-            }
-        }
-    }
-
     // MARK: - Mode Selector
 
     private var modeSelector: some View {
@@ -305,6 +246,8 @@ public struct CameraCaptureView: View {
             }
         }
         .pickerStyle(.segmented)
+        .labelStyle(.iconOnly)
+        .labelsHidden()
         .disabled(cameraService.previewImage == nil || cameraService.isRecording)
     }
 
@@ -374,6 +317,54 @@ public struct CameraCaptureView: View {
         }
     }
 
+    // MARK: - Lens Button
+
+    /// Shown only when the active camera is a multi-lens (virtual) device -
+    /// dual and triple cameras - and the configuration enables the lens
+    /// switcher. Displays the current lens magnification (e.g. 1×); tapping
+    /// shuffles to the next available lens in ascending order (1× → 2× → 3×
+    /// → 0.5× → 1×).
+    @ViewBuilder
+    private var lensButton: some View {
+        if let label = currentLensLabel {
+            Button(action: {
+                Task {
+                    await cameraService.switchLens()
+                }
+            }) {
+                Text(label)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .padding(5)
+                    .grayBackgroundCircle()
+            }
+            .accessibilityLabel("Switch lens")
+            .disabled(!cameraService.isCameraAvailable || cameraService.isRecording)
+        }
+    }
+
+    /// The magnification label of the currently selected lens, or `nil` when
+    /// the active camera has fewer than two lenses.
+    private var currentLensLabel: String? {
+        guard cameraService.lensCount > 1,
+            cameraService.lensMagnifications.count == cameraService.lensCount,
+            cameraService.lensMagnifications.indices.contains(cameraService.selectedLensIndex)
+        else { return nil }
+
+        return lensLabel(for: cameraService.lensMagnifications[cameraService.selectedLensIndex])
+    }
+
+    /// Formats a lens magnification for display: whole numbers render without
+    /// decimals (1×, 3×), fractional ones keep a decimal (0.5×).
+    private func lensLabel(for factor: CGFloat) -> String {
+        let roundedToTenth = (factor * 10).rounded() / 10
+        let number =
+            roundedToTenth == roundedToTenth.rounded()
+            ? String(Int(roundedToTenth))
+            : String(format: "%.1f", roundedToTenth)
+        return number + "×"
+    }
+
     // MARK: - Camera Switch Button
 
     private var cameraSwitchButton: some View {
@@ -385,7 +376,7 @@ public struct CameraCaptureView: View {
             Label("Rotate Camera", systemImage: "camera.rotate")
                 .labelStyle(.iconOnly)
                 .foregroundColor(.white)
-                .padding()
+                .padding(5)
                 .grayBackgroundCircle()
         }
         .disabled(!cameraService.isCameraAvailable || cameraService.isRecording)
@@ -404,19 +395,17 @@ public struct CameraCaptureView: View {
             ZStack {
                 Circle()
                     .fill(.white)
-                    .frame(width: 70, height: 70)
-                    .padding(4)
+                    .frame(width: 55, height: 55)
                     .grayBackgroundCircle()
 
                 if cameraService.isRecording {
                     Circle()
                         .fill(.red)
-                        .frame(width: 50, height: 50)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .frame(width: 45, height: 45)
                 } else {
                     Circle()
                         .fill(cameraService.captureMode == .video ? .red : .black)
-                        .frame(width: 60, height: 60)
+                        .frame(width: 50, height: 50)
                 }
             }
         }

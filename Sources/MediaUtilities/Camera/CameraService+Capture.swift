@@ -49,7 +49,7 @@ extension CameraService {
 
     /// Stops the camera capture session and halts preview frame streaming.
     ///
-    /// The session configuration is preserved — call `start()` to resume
+    /// The session configuration is preserved - call `start()` to resume
     /// without reconfiguring.
     public func stop() async {
         await engine.stop()
@@ -65,6 +65,11 @@ extension CameraService {
     public func switchCamera() async {
         _ = await engine.switchCamera()
 
+        // The two cameras' sensors are mounted 180° apart, so the preview
+        // rotation changes with the active camera even though the device
+        // orientation did not.
+        syncPreviewRotationFromDevice()
+
         // The active device (and therefore its lens state) may have changed.
         lensCount = engine.lensCountSnapshot()
         lensMagnifications = engine.lensMagnificationsSnapshot()
@@ -73,8 +78,8 @@ extension CameraService {
 
     /// Cycles to the next available lens on the active camera.
     ///
-    /// Lenses advance in ascending magnification order — 1× → 2× → 3× → 0.5×
-    /// → 1× — looping back around after the longest lens.
+    /// Lenses advance in ascending magnification order - 1× → 2× → 3× → 0.5×
+    /// → 1× - looping back around after the longest lens.
     ///
     /// - Note: Only multi-lens (virtual) devices support lens switching; on
     ///   single-lens devices this is a no-op.

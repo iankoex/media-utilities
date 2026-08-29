@@ -117,9 +117,11 @@ extension CameraService {
 
     /// Starts video recording with full error handling.
     ///
-    /// Requests microphone access when it has not been determined yet, starts
-    /// the session if necessary, and begins recording to a temporary file.
-    /// The recording continues until `stopVideoRecording()` is called.
+    /// Requests microphone access when it has not been determined yet (only
+    /// when the configuration records audio — a video-only configuration is
+    /// never prompted for, or gated on, the microphone), starts the session
+    /// if necessary, and begins recording to a temporary file. The recording
+    /// continues until `stopVideoRecording()` is called.
     ///
     /// - Returns: `.success` when recording begins, or a `.failure`
     ///   describing why recording could not be started.
@@ -128,13 +130,18 @@ extension CameraService {
             return .failure(.permissionDenied)
         }
 
-        // Lazily request audio permission if not yet determined
-        if microphoneAuthorizationStatus == .notDetermined {
-            await AVCaptureDevice.requestAccess(for: .audio)
-        }
+        // Mic permission is only relevant when the configuration includes
+        // audio; without it the engine wires no microphone input and the
+        // recording is video-only by design.
+        if configuration.capturesAudio {
+            // Lazily request audio permission if not yet determined
+            if microphoneAuthorizationStatus == .notDetermined {
+                await AVCaptureDevice.requestAccess(for: .audio)
+            }
 
-        guard microphoneAuthorizationStatus == .authorized else {
-            return .failure(.microphonePermissionDenied)
+            guard microphoneAuthorizationStatus == .authorized else {
+                return .failure(.microphonePermissionDenied)
+            }
         }
 
         guard isCameraAvailable else {
@@ -188,6 +195,13 @@ extension CameraService {
         // Start observing runtime notifications via the engine.
         await engine.startObservingNotifications()
 
+        // The preview rotation cannot come from the rotation coordinator (its
+        // preview angle needs a real, laid-out preview layer, which this
+        // package does not render with), so derive it from the device
+        // orientation: seed now, then track changes while the camera is up.
+        syncPreviewRotationFromDevice()
+        startObservingDeviceOrientationChanges()
+
         // Purge capture files left behind by previous sessions (older than
         // 24 hours). Runs off the main actor; consumers are expected to have
         // consumed URLs they were given long before then.
@@ -198,7 +212,7 @@ extension CameraService {
             return .failure(.configurationFailed)
         }
 
-        // The active device is now known — publish its lens state.
+        // The active device is now known - publish its lens state.
         lensCount = engine.lensCountSnapshot()
         lensMagnifications = engine.lensMagnificationsSnapshot()
         selectedLensIndex = engine.selectedLensIndexSnapshot()
@@ -218,6 +232,12 @@ extension CameraService {
     ///   again before using the camera.
     public func cleanupCamera() async {
         await engine.cleanup()
+
+        orientationObservationTask?.cancel()
+        orientationObservationTask = nil
+        #if os(iOS)
+        engine.previewRotationAngle = 90
+        #endif
 
         // Reset facade state
         isCapturingPhoto = false

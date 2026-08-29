@@ -15,21 +15,30 @@ extension CameraService {
 
     /// Requests camera and microphone access permissions from the user.
     ///
-    /// This method prompts the user for both camera and microphone access permissions
-    /// if they haven't been determined yet. Both permissions are requested concurrently
-    /// for a unified permission experience. The permission dialogs will only be shown once,
-    /// subsequent calls will return the current permission statuses.
+    /// This method prompts the user for camera access, plus microphone access
+    /// when the configuration records audio (a video-only configuration never
+    /// triggers the microphone prompt). Permissions that have not been
+    /// determined yet are requested concurrently for a unified permission
+    /// experience. The permission dialogs will only be shown once, subsequent
+    /// calls will return the current permission statuses.
     ///
-    /// - Note: This method should be called before attempting to use camera features that require audio.
-    ///   If audio permission was not requested here, `startVideoRecording()` will lazily request it when needed.
+    /// - Note: This method should be called before attempting to use camera
+    ///   features that require audio. If audio permission was not requested
+    ///   here, `startVideoRecording()` will lazily request it when needed.
     public func requestCameraAccess() async {
-        // Request both video and audio permissions concurrently
         if allowedCaptureModes.contains(.video) {
-            async let videoPermission = AVCaptureDevice.requestAccess(for: .video)
-            async let audioPermission = AVCaptureDevice.requestAccess(for: .audio)
+            if configuration.capturesAudio {
+                // Request both video and audio permissions concurrently
+                async let videoPermission = AVCaptureDevice.requestAccess(for: .video)
+                async let audioPermission = AVCaptureDevice.requestAccess(for: .audio)
 
-            // Wait for both permission requests to complete
-            _ = await (videoPermission, audioPermission)
+                // Wait for both permission requests to complete
+                _ = await (videoPermission, audioPermission)
+            } else {
+                // Video-only configuration: the microphone is not wired and
+                // must not be prompted for.
+                await AVCaptureDevice.requestAccess(for: .video)
+            }
         } else {
             // just ask for video permission audio is not needed for photos
             await AVCaptureDevice.requestAccess(for: .video)

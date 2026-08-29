@@ -62,7 +62,7 @@ final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
             return
         }
 
-        // HEVC captures are HEIC data — sniff the payload to pick the
+        // HEVC captures are HEIC data - sniff the payload to pick the
         // extension instead of assuming JPEG. JPEG begins with the FF D8
         // marker; the HEVC photo path produces a HEIC container.
         let pathExtension = imageData.starts(with: [0xFF, 0xD8]) ? "jpg" : "heic"

@@ -81,7 +81,7 @@ public struct CaptureConfiguration: Equatable, Sendable {
 
     // MARK: Lens Selection UI
 
-    /// Whether the camera interface shows the lens switcher — the button that
+    /// Whether the camera interface shows the lens switcher - the button that
     /// cycles the active lens on multi-lens (virtual) devices (1× → 2× → 3× →
     /// 0.5× → 1×).
     ///

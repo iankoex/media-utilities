@@ -102,11 +102,34 @@ actor CameraEngine {
     var activeFormatObservation: NSKeyValueObservation?
 
     /// The latest `videoRotationAngleForHorizonLevelCapture` reported by the
-    /// coordinator. Read by `dispatchPhotoCapture` and `applyCaptureRotationToPhotoAndMovieOutputs`
-    /// to apply the correct rotation per capture, and by the facade's preview
-    /// loop (which adds front-camera mirroring on top) so the SwiftUI preview
-    /// matches the device orientation.
-    nonisolated(unsafe) var captureRotationAngle: CGFloat = 90
+    /// coordinator. Read by `dispatchPhotoCapture` and
+    /// `applyCaptureRotationToPhotoAndMovieOutputs` to apply the correct
+    /// rotation to photos and recordings. This is the angle that makes
+    /// *captured media* come out straight - it must not be used for the live
+    /// preview, which follows the user's grip via `previewRotationAngle`.
+    /// Defaults to 90 (portrait) on iOS and 0 on macOS, where camera frames
+    /// are natively upright (the coordinator reports 0 there too).
+    nonisolated(unsafe) var captureRotationAngle: CGFloat = CameraEngine.defaultCaptureRotationAngle
+
+    /// The rotation that keeps the live preview upright relative to how the
+    /// user is currently holding the device. Derived from `UIDeviceOrientation`
+    /// by the facade (`syncPreviewRotationFromDevice`) on iOS; on macOS it
+    /// stays at 0, since camera frames are natively upright and there is no
+    /// held-device orientation to track. Written by the facade on the main
+    /// actor, read per frame by the preview loop - word-sized writes with
+    /// benign tearing, same rationale as `captureRotationAngle`.
+    nonisolated(unsafe) var previewRotationAngle: CGFloat = CameraEngine.defaultPreviewRotationAngle
+
+    /// Default rotation corrections before the coordinator seeds the capture
+    /// angle and while no device-orientation sync has run: iOS portraits need
+    /// 90° clockwise; macOS camera frames need none.
+    #if os(macOS)
+    private static let defaultCaptureRotationAngle: CGFloat = 0
+    private static let defaultPreviewRotationAngle: CGFloat = 0
+    #else
+    private static let defaultCaptureRotationAngle: CGFloat = 90
+    private static let defaultPreviewRotationAngle: CGFloat = 90
+    #endif
 
     /// Creates a new rotation coordinator for the given device and observes it.
     /// On iOS 17+ / macOS 14+ this drives the rotation automatically and
@@ -141,17 +164,15 @@ actor CameraEngine {
 
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
 
-        // Seed the capture angle. This is deliberately the only angle we
-        // consume: the preview angle is computed from the preview layer's
-        // geometry, and our synthetic, never-rendered layer reports 0 for the
-        // back camera. The capture angle is the horizon-level angle for raw
-        // buffers - the same value that makes photos and recordings come out
-        // straight - so the facade's preview loop uses it too (adding
-        // front-camera mirroring for the natural selfie view).
+        // Seed the capture angle. The capture angle is the horizon-level angle
+        // for raw buffers - the value that makes photos and recordings come
+        // out straight. The preview angle is deliberately NOT taken from the
+        // coordinator (see `previewRotationAngle`); the facade derives it from
+        // the device orientation instead.
         captureRotationAngle = coordinator.videoRotationAngleForHorizonLevelCapture
 
-        // Observe capture rotation. This keeps photos, recordings, and the
-        // preview loop tracking device-orientation changes.
+        // Observe capture rotation. This keeps photos and recordings tracking
+        // device-orientation changes.
         let captureObservation = coordinator.observe(
             \.videoRotationAngleForHorizonLevelCapture,
             options: [.new]
@@ -191,7 +212,7 @@ actor CameraEngine {
     /// Called when the active device's `activeFormat` changes. The session
     /// reconfigures the device's format when its preset changes (the two are
     /// mutually exclusive per AVFoundation), and a format change resets the
-    /// device's zoom to its default — the 0.5× ultra-wide on multi-lens
+    /// device's zoom to its default - the 0.5× ultra-wide on multi-lens
     /// devices. Re-applies the retained lens at the moment the reset lands,
     /// and bumps the generation counter so the preset-change settle wait (see
     /// `applySessionPresetForMode`) knows the reset has been handled.
@@ -294,6 +315,9 @@ actor CameraEngine {
                 .builtInWideAngleCamera,
             ]
             #elseif os(macOS)
+            if #available(macOS 14.0, *) {
+                return [.external, .builtInWideAngleCamera]
+            }
             return [.builtInWideAngleCamera]
             #endif
         }()
@@ -359,7 +383,7 @@ actor CameraEngine {
         }
 
         // Cancel notification observers and drop the cached device discovery
-        // — they would otherwise accumulate / go stale across
+        // - they would otherwise accumulate / go stale across
         // re-initializations.
         notificationObservationTasks.forEach { $0.cancel() }
         notificationObservationTasks.removeAll()
@@ -425,6 +449,13 @@ actor CameraEngine {
         captureSession.sessionPreset = (captureMode == .photo) ? .photo : .high
 
         let movieFileOutput = AVCaptureMovieFileOutput()
+        // By default the output writes a "movie fragment" (partial sample
+        // tables) every 10 seconds, and that fragment writer is known to
+        // intermittently lose the audio sample table on recordings of roughly
+        // 12 seconds or longer - the file finalizes with video only and no
+        // error. Disabling fragments makes the movie finalize atomically, all
+        // sample tables written exactly once.
+        movieFileOutput.movieFragmentInterval = .invalid
         let photoOutput = AVCapturePhotoOutput()
         let videoOutput = AVCaptureVideoDataOutput()
         let videoDataDelegate = VideoDataOutputDelegate(
@@ -628,8 +659,8 @@ actor CameraEngine {
     /// `commitConfiguration()` returns, so the preview is frozen for the whole
     /// transition: the preset is committed, the retained lens is re-applied
     /// immediately (covering a format change that settles synchronously), and
-    /// frames stay dropped until the format change has settled — detected via
-    /// the `activeFormat` KVO generation counter — with one final lens restore
+    /// frames stay dropped until the format change has settled - detected via
+    /// the `activeFormat` KVO generation counter - with one final lens restore
     /// (plus a short hold for the virtual device's constituent blend) before
     /// the preview resumes. The zoom reset is therefore never rendered and the
     /// selected lens is maintained across the mode switch.
@@ -806,6 +837,12 @@ actor CameraEngine {
         let delegate = MovieRecordingDelegate(engine: self)
         activeMovieDelegate = delegate
 
+        // Whether this recording should carry audio: the movie output's audio
+        // connection was just (re-)enabled and the mic input is wired. The
+        // finish handler refuses to yield a file that violates this.
+        recordingExpectAudioTrack =
+            movieFileOutput.connection(with: .audio)?.isEnabled == true
+
         movieFileOutput.startRecording(to: filePath, recordingDelegate: delegate)
 
         playRecordingStartSound()
@@ -840,22 +877,114 @@ actor CameraEngine {
     /// recording races `stopRecordingVideo()`.
     var recordingDidFinish = false
 
+    /// Whether the in-flight recording was started with an enabled audio
+    /// connection. Set at record start; read by the finish handler.
+    var recordingExpectAudioTrack = false
+
+    /// How long the finish handler waits for the audio track to become
+    /// visible in the finished file before failing the recording.
+    ///
+    /// With fragments disabled, a recording is final (and byte-stable) by the
+    /// time this callback fires, so on the rare broken recording this timeout
+    /// only delays an already-determined failure. It is kept at 10 s rather
+    /// than collapsed to a single probe out of caution for OS updates
+    /// reintroducing a late-flush flavor of the bug.
+    private static let audioFlushTimeout: TimeInterval = 10
+
     /// Invoked (on the actor) by `MovieRecordingDelegate` when the recording
     /// finishes: clears the retained delegate and resumes the pending stop
     /// continuation.
-    func movieRecordingDidFinish(url: URL, error: Error?) {
+    ///
+    /// `AVCaptureMovieFileOutput` can deliver this callback with `error == nil`
+    /// while the audio track is not (yet) visible in the file - historically
+    /// caused by the periodic movie-fragment writer (disabled at wiring; see
+    /// `wireSession`).
+    ///
+    /// Why the audio verification below is kept even though that fix is in
+    /// place: the fragment bug was intermittent across iOS versions and
+    /// haunted production for years before it was diagnosed (long recordings
+    /// ≳12 s finalizing video-only with no error). It is unverifiable in unit
+    /// tests and could resurface with an OS update; the cost of the check on
+    /// a healthy recording is a single file probe, negligible next to the
+    /// upload that follows. Without it, a regression would again ship mute
+    /// videos silently; with it, the recording fails visibly and the user
+    /// re-records.
+    ///
+    /// The file is probed through byte-copies on fresh temporary paths,
+    /// because the in-process media cache serves a stale video-only view of
+    /// the *original* path indefinitely (even through new `AVURLAsset`
+    /// instances), while a copy at a never-before-seen URL is read from disk.
+    /// If audio never becomes visible within the timeout, the recording fails
+    /// loudly instead of handing out a silent video.
+    func movieRecordingDidFinish(url: URL, error: Error?) async {
         activeMovieDelegate = nil
         recordingDidFinish = true
 
+        // Take ownership of the continuation up front. Everything below can
+        // await (the flush poll); whichever of this handler and `cleanup()`
+        // claims the continuation first on this actor is its sole resumer.
         let pending = pendingRecordingContinuation
         pendingRecordingContinuation = nil
 
         if error != nil {
             pending?.resume(returning: .failure(.recordingFailed))
-        } else {
-            movieStreamContinuation?.yield(url)
-            pending?.resume(returning: .success(url))
+            return
         }
+
+        if recordingExpectAudioTrack {
+            let audioVisible = await waitForAudioTrack(in: url)
+            if !audioVisible {
+                // Guard rail: audio was wired but never landed in the file.
+                // Delete the mute file and surface a visible failure so the
+                // user re-records rather than posting a silent video.
+                try? FileManager.default.removeItem(at: url)
+                pending?.resume(returning: .failure(.recordingFailed))
+                return
+            }
+        }
+
+        movieStreamContinuation?.yield(url)
+        pending?.resume(returning: .success(url))
+    }
+
+    /// Polls byte-copies of the recorded file until an audio track is
+    /// visible, or returns `false` when the flush timeout elapses.
+    ///
+    /// On a healthy recording the very first probe succeeds, so the poll is
+    /// free; the loop only spends time on a recording that is already broken
+    /// (and will fail loudly when the caller sees `false`). See the
+    /// `movieRecordingDidFinish` doc comment for why this verification is
+    /// retained alongside the movie-fragment fix.
+    private func waitForAudioTrack(in url: URL) async -> Bool {
+        let deadline = Date().addingTimeInterval(Self.audioFlushTimeout)
+        while Date() < deadline {
+            let probeURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("audio-flush-probe-\(UUID().uuidString).mp4")
+            do {
+                // Force a real read of the bytes: the in-process cache will
+                // happily serve the stale video-only view of `url` itself.
+                let bytes = try Data(contentsOf: url)
+                try bytes.write(to: probeURL)
+
+                let probeAsset = AVURLAsset(url: probeURL)
+                let audioTrackCount: Int
+                if #available(iOS 15.0, macOS 12.0, *) {
+                    audioTrackCount = (try? await probeAsset.loadTracks(withMediaType: .audio).count) ?? 0
+                } else {
+                    audioTrackCount = probeAsset.tracks(withMediaType: .audio).count
+                }
+                try? FileManager.default.removeItem(at: probeURL)
+
+                if audioTrackCount > 0 {
+                    return true
+                }
+            } catch {
+                // Probe failed (e.g. transient read error); retry on the next
+                // tick below.
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        return false
     }
 
     // MARK: - Recovery
@@ -936,7 +1065,7 @@ actor CameraEngine {
 
     /// Notification observation tasks. The notification streams never finish
     /// on their own and `initializeCamera()` can run more than once, so the
-    /// tasks are retained here and cancelled in `cleanup()` — otherwise every
+    /// tasks are retained here and cancelled in `cleanup()` - otherwise every
     /// initialization would leak three live tasks.
     var notificationObservationTasks: [Task<Void, Never>] = []
 
@@ -1078,7 +1207,7 @@ actor CameraEngine {
 
     /// Counts `activeFormat` changes on the active device. The mode-switch
     /// preset transition (see `applySessionPresetForMode`) uses it to detect
-    /// that the format change — and its zoom reset — has landed.
+    /// that the format change - and its zoom reset - has landed.
     let formatChangeGenerationHolder = IntHolder(0)
 
     /// The number of lenses available on the active camera. Non-virtual
@@ -1094,7 +1223,7 @@ actor CameraEngine {
     }
 
     /// The display magnification of each lens on the active device, relative
-    /// to the wide lens — e.g. `[0.5, 1, 3]` for a triple camera.
+    /// to the wide lens - e.g. `[0.5, 1, 3]` for a triple camera.
     ///
     /// Derived from the virtual device's switchover zoom factors: each factor
     /// encodes the focal ratio between adjacent constituents, so the ratios
@@ -1129,7 +1258,7 @@ actor CameraEngine {
     /// minimum zoom factor, and each subsequent lens's native magnification
     /// sits at its switchover point (`virtualDeviceSwitchOverVideoZoomFactors`
     /// has one element per constituent after the first). The zoom factor is
-    /// aimed a small epsilon past that point — landing exactly on the
+    /// aimed a small epsilon past that point - landing exactly on the
     /// switchover makes the lens handoff stall mid-transition before the
     /// zoom continues to the target.
     ///
@@ -1137,7 +1266,7 @@ actor CameraEngine {
     ///   - index: Position of the lens, in `0 ..< lensCountSnapshot()`.
     ///   - ramping: When `true` (user-initiated changes on a running
     ///     session), the zoom glides to the target at `lensRampRate` instead
-    ///     of snapping. When `false` (session wiring, camera switches — where
+    ///     of snapping. When `false` (session wiring, camera switches - where
     ///     the device may not be running yet) the zoom is set directly.
     func selectLens(at index: Int, ramping: Bool) {
         guard let device = currentDeviceHolder.device else { return }
@@ -1154,7 +1283,7 @@ actor CameraEngine {
             }
             selectedLensIndexHolder.value = index
         } catch {
-            // Lens change failed — continue silently.
+            // Lens change failed - continue silently.
         }
     }
 
@@ -1186,7 +1315,7 @@ actor CameraEngine {
 
     /// Ramp speed for smooth lens transitions, in zoom-factor units per
     /// second. A 0.5× ↔ 1× hop therefore completes in a few hundredths of a
-    /// second — quick enough to read as an immediate lens change.
+    /// second - quick enough to read as an immediate lens change.
     private static let lensRampRate: CGFloat = 20
 
     /// Cycles to the next lens of the active multi-lens (virtual) device.
@@ -1202,7 +1331,7 @@ actor CameraEngine {
         guard let device = currentDeviceHolder.device else { return }
 
         if let oneXIndex = lensMagnificationsSnapshot().firstIndex(where: { $0 == 1.0 }) {
-            // Direct set — at session wiring time the device may not be
+            // Direct set - at session wiring time the device may not be
             // running yet, so a zoom ramp would not progress.
             selectLens(at: oneXIndex, ramping: false)
             return
@@ -1216,7 +1345,7 @@ actor CameraEngine {
                 device.videoZoomFactor = 1.0
             }
         } catch {
-            // Zoom change failed — continue silently.
+            // Zoom change failed - continue silently.
         }
     }
     #else
@@ -1375,6 +1504,11 @@ actor CameraEngine {
             .builtInWideAngleCamera,
         ]
         #elseif os(macOS)
+        // See `initialDeviceTypes`: `.external` adds external webcams and
+        // Continuity Camera devices on macOS 14+.
+        if #available(macOS 14.0, *) {
+            return [.external, .builtInWideAngleCamera]
+        }
         return [.builtInWideAngleCamera]
         #endif
     }
@@ -1409,11 +1543,13 @@ actor CameraEngine {
             devices += [backDevice]
         }
         #else
-        if let backDevice = backCaptureDevices().first {
-            devices += [backDevice]
-        }
+        // macOS: the discovery session is already video-only, and camera
+        // position is unreliable there - the built-in FaceTime camera reports
+        // `.unspecified` (verified) while external cameras may report `.back`
+        // - so keep every discovered device rather than filtering by position.
+        devices += allCaptureDevices()
         #endif
-        if let frontDevice = frontCaptureDevices().first {
+        if let frontDevice = frontCaptureDevices().first, !devices.contains(frontDevice) {
             devices += [frontDevice]
         }
 

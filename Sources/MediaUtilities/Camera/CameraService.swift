@@ -170,7 +170,7 @@ public final class CameraService: ObservableObject {
     @Published public var sessionError: CameraError?
 
     /// The number of lenses available on the active camera. Multi-lens
-    /// (virtual) devices — dual and triple cameras — expose their constituent
+    /// (virtual) devices - dual and triple cameras - expose their constituent
     /// lenses here; single-lens devices report 1.
     @Published public internal(set) var lensCount: Int = 1
 
@@ -223,10 +223,11 @@ public final class CameraService: ObservableObject {
         authorizationStatus == .authorized && !engine.availableCaptureDevices().isEmpty
     }
 
-    /// A Boolean value indicating whether camera and microphone are both available and authorized.
+    /// A Boolean value indicating whether camera (and, when the configuration
+    /// records audio, microphone) are available and authorized.
     public var isCameraAndMicrophoneAvailable: Bool {
         authorizationStatus == .authorized
-            && microphoneAuthorizationStatus == .authorized
+            && (!configuration.capturesAudio || microphoneAuthorizationStatus == .authorized)
             && !engine.availableCaptureDevices().isEmpty
     }
 
@@ -260,6 +261,11 @@ public final class CameraService: ObservableObject {
     // MARK: - Preview Handling
 
     var previewLoop: Task<Void, Never>?
+
+    /// Observes device-orientation changes and re-derives the preview
+    /// rotation (see `syncPreviewRotationFromDevice()`). Started by
+    /// `initializeCamera()` and cancelled in `cleanupCamera()`.
+    var orientationObservationTask: Task<Void, Never>?
 
     // MARK: - Initialization
 
@@ -368,14 +374,14 @@ public final class CameraService: ObservableObject {
                 // The video data output connection is pinned to 0° and never
                 // mirrored (see `updateVideoOutputConnection`), so rotation and
                 // front-camera mirroring are applied here on the raw buffer.
-                // The angle comes from the coordinator's *capture* angle: for a
-                // raw buffer it is the same horizon-level angle, and it is the
-                // value that already produces straight photos. The coordinator's
-                // *preview* angle is derived from the preview layer's geometry -
-                // our synthetic, never-rendered layer reports 0 for the back
-                // camera, which is what left the preview sideways by 90°.
+                // The angle is the preview rotation derived from the device
+                // orientation (`syncPreviewRotationFromDevice`): it tracks how
+                // the user is currently holding the device, so the live preview
+                // stays upright and screen-filling in every orientation.
+                // Photos and recordings use the separate coordinator *capture*
+                // angle and are unaffected by this loop.
                 let upright = rawImage.uprightPreview(
-                    rotationAngle: engine.captureRotationAngle,
+                    rotationAngle: engine.previewRotationAngle,
                     mirrored: engine.isUsingFrontCaptureDeviceNow()
                 )
                 guard let cgImage = ciContext.createCGImage(upright, from: upright.extent) else {
@@ -392,6 +398,54 @@ public final class CameraService: ObservableObject {
             }
         }
     }
+
+    // MARK: - Preview Rotation
+
+    /// Maps the device orientation to the preview rotation angle. The raw
+    /// sensor buffer's intrinsic top is the phone's right edge in portrait, so
+    /// portrait needs a 90° clockwise correction, and every 90° of device
+    /// rotation offsets the angle by the same amount: portrait 90°,
+    /// landscapeLeft (top edge left) 0°, landscapeRight 180°, upside-down 270°.
+    /// The front camera's correction is offset by -90° (verified on device).
+    /// Consumed by the preview loop via `engine.previewRotationAngle`. The
+    /// rotation coordinator's preview angle cannot be used here - it is
+    /// computed against the preview layer's geometry, and this package renders
+    /// its preview without a real layer.
+    func syncPreviewRotationFromDevice() {
+        #if os(iOS)
+        let baseAngle: CGFloat
+        switch UIDevice.current.orientation {
+            case .portrait: baseAngle = 90
+            case .portraitUpsideDown: baseAngle = 270
+            case .landscapeLeft: baseAngle = 0
+            case .landscapeRight: baseAngle = 180
+            default: return  // faceUp/faceDown/unknown: keep the last angle
+        }
+        let usingFront = engine.isUsingFrontCaptureDeviceNow()
+        engine.previewRotationAngle = usingFront
+            ? (baseAngle - 90).truncatingRemainder(dividingBy: 360)
+            : baseAngle
+        #endif
+    }
+
+    func startObservingDeviceOrientationChanges() {
+        #if os(iOS)
+        guard orientationObservationTask == nil else { return }
+        orientationObservationTask = Task { [weak self] in
+            // Same availability gate the engine uses for its notification
+            // streams; on older OS the preview rotation simply stays at its
+            // seeded portrait value.
+            if #available(iOS 15.0, *) {
+                for await _ in NotificationCenter.default.notifications(
+                    named: UIDevice.orientationDidChangeNotification
+                ) {
+                    guard let self, !Task.isCancelled else { return }
+                    self.syncPreviewRotationFromDevice()
+                }
+            }
+        }
+        #endif
+    }
 }
 
 // MARK: - Preview Frame Conversion
@@ -401,9 +455,9 @@ extension CIImage {
     /// Rotates a raw (0°) sensor buffer upright for preview display and
     /// optionally mirrors it horizontally (front camera).
     ///
-    /// `rotationAngle` is the clockwise horizon-level angle reported by the
-    /// rotation coordinator (the *capture* angle - see `handleCameraPreviews`),
-    /// or 90 by default on OS versions without a coordinator.
+    /// `rotationAngle` is the clockwise correction for the current device
+    /// orientation (the preview rotation - see `syncPreviewRotationFromDevice`),
+    /// or 90 by default on OS versions without device-orientation tracking.
     fileprivate func uprightPreview(rotationAngle: CGFloat, mirrored: Bool) -> CIImage {
         let orientation: CGImagePropertyOrientation
         switch rotationAngle {
