@@ -49,8 +49,8 @@ public final class VideoUtil: ObservableObject {
             let composition = AVMutableComposition()
             let compositionVideoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
             if let sourceVideoTrack: AVAssetTrack = asset.tracks(withMediaType: .video).first {
-                let x = CMTimeRangeMake(start: .zero, duration: asset.duration)
-                try? compositionVideoTrack?.insertTimeRange(x, of: sourceVideoTrack, at: .zero)
+                let fullVideoTimeRange = CMTimeRangeMake(start: .zero, duration: asset.duration)
+                try? compositionVideoTrack?.insertTimeRange(fullVideoTimeRange, of: sourceVideoTrack, at: .zero)
                 compositionVideoTrack?.preferredTransform = sourceVideoTrack.preferredTransform
             }
             exporter = AVAssetExportSession(asset: composition, presetName: preset.value)

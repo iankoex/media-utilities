@@ -1,6 +1,6 @@
 import SwiftUI
 
-public struct RangeSliderOptions: OptionSet {
+public struct RangeSliderOptions: OptionSet, Sendable {
     public let rawValue: Int
 
     public static let forceAdjacentValue = RangeSliderOptions(rawValue: 1 << 0)

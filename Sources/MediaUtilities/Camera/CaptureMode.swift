@@ -15,7 +15,19 @@ import Foundation
 /// configured for photo capture or video recording. This enum
 /// is used to switch between different capture functionalities
 /// and update the UI accordingly.
-public enum CaptureMode: String, CaseIterable, Identifiable {
+///
+/// ## Usage
+///
+/// ```swift
+/// var configuration = CaptureConfiguration()
+/// configuration.allowedCaptureModes = [.photo, .video]
+/// ```
+///
+/// ## Platform Availability
+///
+/// - iOS 13.0+
+/// - macOS 10.15+
+public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
     /// Photo capture mode for taking still images.
     case photo = "photo"
 

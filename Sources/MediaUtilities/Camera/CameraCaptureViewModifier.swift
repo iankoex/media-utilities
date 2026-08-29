@@ -37,7 +37,7 @@ extension View {
     ///         }
     ///         .cameraCapture(
     ///             isPresented: $showCamera,
-    ///             allowedCaptureModes: [.photo, .video]
+    ///             configuration: CaptureConfiguration(allowedCaptureModes: [.photo])
     ///         ) { result in
     ///             switch result {
     ///             case .success(let url):
@@ -61,6 +61,50 @@ extension View {
     ///   When set to `true`, the camera interface appears. When set to `false`,
     ///   it disappears. The binding is automatically set to `false` when the
     ///   camera interface is dismissed.
+    /// - configuration: Describes how the camera pipeline behaves - allowed
+    ///   capture modes, photo quality and resolution, initial camera position,
+    ///   and audio. Defaults to standard behavior (photo + video, `.balanced`
+    ///   stills, back camera, audio on).
+    /// - onCapture: A closure that handles the result of camera operations.
+    ///   Called when a photo is captured or video recording completes,
+    ///   providing either the media URL or an error.
+    ///
+    /// - Returns: A view that presents the camera capture interface as a modal.
+    public func cameraCapture(
+        isPresented: Binding<Bool>,
+        configuration: CaptureConfiguration = CaptureConfiguration(),
+        onCapture: @escaping (Result<URL, CameraError>) -> Void
+    ) -> some View {
+        #if os(iOS)
+        fullScreenCover(isPresented: isPresented) {
+            CameraCaptureView(
+                configuration: configuration,
+                onCapture: { result in
+                    isPresented.wrappedValue = false
+                    onCapture(result)
+                }
+            )
+        }
+        #else
+        // On macOS, use sheet presentation instead of fullScreenCover
+        sheet(isPresented: isPresented) {
+            CameraCaptureView(
+                configuration: configuration,
+                onCapture: { result in
+                    isPresented.wrappedValue = false
+                    onCapture(result)
+                }
+            )
+        }
+        #endif
+    }
+
+    /// Presents a full-screen camera capture interface as a modal overlay,
+    /// restricted to the given capture modes, with all other configuration
+    /// values at their defaults.
+    ///
+    /// - Parameters:
+    ///   - isPresented: A binding that controls the modal presentation state.
     /// - allowedCaptureModes: A set of capture modes that should be available in the camera interface.
     ///   Defaults to `[.photo, .video]` to allow both photo and video capture.
     ///   Use `[.photo]` to restrict to photo-only or `[.video]` for video-only.
@@ -74,27 +118,10 @@ extension View {
         allowedCaptureModes: Set<CaptureMode> = [.photo, .video],
         onCapture: @escaping (Result<URL, CameraError>) -> Void
     ) -> some View {
-        #if os(iOS)
-        fullScreenCover(isPresented: isPresented) {
-            CameraCaptureView(
-                allowedCaptureModes: allowedCaptureModes,
-                onCapture: { result in
-                    isPresented.wrappedValue = false
-                    onCapture(result)
-                }
-            )
-        }
-        #else
-        // On macOS, use sheet presentation instead of fullScreenCover
-        sheet(isPresented: isPresented) {
-            CameraCaptureView(
-                allowedCaptureModes: allowedCaptureModes,
-                onCapture: { result in
-                    isPresented.wrappedValue = false
-                    onCapture(result)
-                }
-            )
-        }
-        #endif
+        cameraCapture(
+            isPresented: isPresented,
+            configuration: CaptureConfiguration(allowedCaptureModes: allowedCaptureModes),
+            onCapture: onCapture
+        )
     }
 }

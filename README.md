@@ -132,7 +132,7 @@ class CameraManager {
     }
 
     func capturePhoto() async {
-        let result = await cameraService.capturePhotoWithCompletion()
+        let result = await cameraService.capturePhoto()
         switch result {
         case .success(let url):
             print("Photo saved to: \(url)")

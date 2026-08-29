@@ -6,6 +6,7 @@
 //
 
 import Foundation
+
 #if os(iOS)
 import UIKit
 #else
@@ -41,7 +42,7 @@ import AppKit
 /// - macOS 10.15+
 ///
 public struct MediaUtilities {
-    
+
     /// Crops an image to a specified rectangular region with optional circular masking.
     ///
     /// This function crops the input image to the specified rectangular region and optionally
@@ -73,7 +74,9 @@ public struct MediaUtilities {
     ///     `.rectangular` leaves the image as a rectangle
     /// - Returns: A new `UnifiedImage` containing the cropped result
     /// - Throws: `MediaUtilitiesError.cropImageError` if cropping fails due to invalid input or processing errors
-    public static func cropImage(_ image: UnifiedImage, to size: CGRect, using maskShape: MaskShape) throws -> UnifiedImage {
+    public static func cropImage(_ image: UnifiedImage, to size: CGRect, using maskShape: MaskShape) throws
+        -> UnifiedImage
+    {
         guard let image = image.withCorrectOrientation else {
             throw MediaUtilitiesError.cropImageError("couldn't get correct orientation")
         }
@@ -92,8 +95,7 @@ public struct MediaUtilities {
         }
         return croppedImage
     }
-    
-    
+
     /// Rotates an image by a specified angle.
     ///
     /// This function rotates the input image by the specified angle using Core Image
@@ -134,22 +136,22 @@ public struct MediaUtilities {
         let ciImage = CIImage(cgImage: cgImage)
         let rotationInRadians = angle.converted(to: .radians).value
         let rotatedRect = ciImage.extent.applying(CGAffineTransform(rotationAngle: CGFloat(rotationInRadians)))
-        
+
         let translateX = -rotatedRect.origin.x
         let translateY = -rotatedRect.origin.y
-        
+
         let rotationTransform = CGAffineTransform(rotationAngle: CGFloat(rotationInRadians))
-        rotationTransform.concatenating(CGAffineTransform(translationX: translateX, y: translateY))
-        
-        let transformedImage = ciImage.transformed(by: rotationTransform)
-        
+        let fullTransform = rotationTransform.concatenating(CGAffineTransform(translationX: translateX, y: translateY))
+
+        let transformedImage = ciImage.transformed(by: fullTransform)
+
         let context = CIContext()
         guard let outputCGImage = context.createCGImage(transformedImage, from: transformedImage.extent) else {
             throw MediaUtilitiesError.rotateImageError("couldn't create CGImage from transformed CIImage")
         }
         return UnifiedImage(cgImage: outputCGImage)
     }
-    
+
     /// Straightens an image by correcting perspective distortion.
     ///
     /// This function applies a straightening filter to correct perspective distortion

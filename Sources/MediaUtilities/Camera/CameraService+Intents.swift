@@ -6,6 +6,7 @@
 //
 
 import AVFoundation
+import CoreImage
 import Foundation
 
 // MARK: - Camera Error
@@ -15,6 +16,18 @@ import Foundation
 /// The `CameraError` enum encompasses all possible failure scenarios
 /// when working with the camera service, providing localized descriptions
 /// for user-facing error messages and enabling proper error handling.
+///
+/// ## Usage
+///
+/// ```swift
+/// let result = await cameraService.capturePhoto()
+/// switch result {
+/// case .success(let url):
+///     print("Photo saved to: \(url)")
+/// case .failure(let error):
+///     print(error.localizedDescription)
+/// }
+/// ```
 public enum CameraError: LocalizedError, Equatable {
     /// Camera access was denied by the user.
     case permissionDenied
@@ -68,89 +81,51 @@ public enum CameraError: LocalizedError, Equatable {
 @available(iOS 13.0, macOS 10.15, *)
 extension CameraService {
 
-    /// Captures a photo with comprehensive error handling and user-friendly result.
+    /// Captures a still photo with full error handling.
     ///
-    /// This method provides a high-level interface for photo capture with automatic
-    /// permission checking, camera availability validation, and proper error handling.
-    /// It's the recommended method for most photo capture use cases.
+    /// Starts the session if it is not already running, then captures a photo
+    /// and saves it to a temporary file. The `isCapturingPhoto` published
+    /// property is `true` for the duration of the capture.
     ///
-    /// ## Usage
-    ///
-    /// ```swift
-    /// let result = await cameraService.capturePhotoWithCompletion()
-    /// switch result {
-    /// case .success(let url):
-    ///     print("Photo captured: \(url)")
-    /// case .failure(let error):
-    ///     print("Capture failed: \(error)")
-    /// }
-    /// ```
-    ///
-    /// - Returns: `Result<URL, CameraError>` containing the photo URL or error information.
-    @concurrent
-    public func capturePhotoWithCompletion() async -> Result<URL, CameraError> {
+    /// - Returns: `.success` with the photo file URL, or a `.failure`
+    ///   describing why the capture could not be performed.
+    public func capturePhoto() async -> Result<URL, CameraError> {
         guard authorizationStatus == .authorized else {
             return .failure(.permissionDenied)
         }
 
-        // Check camera availability
         guard isCameraAvailable else {
             return .failure(.deviceNotAvailable)
         }
 
-        // Ensure session is running
         if !isRunning {
             guard await start() else {
                 return .failure(.configurationFailed)
             }
         }
 
-        await MainActor.run {
-            isCapturingPhoto = true
-        }
+        isCapturingPhoto = true
 
-        guard let photoURL = await capturePhoto() else {
-            await MainActor.run {
-                isCapturingPhoto = false
-            }
+        let photoURL = await engine.capturePhoto(flashMode: flashMode)
+        isCapturingPhoto = false
+
+        guard let photoURL else {
             return .failure(.captureFailed)
-        }
-
-        await MainActor.run {
-            isCapturingPhoto = false
         }
         return .success(photoURL)
     }
 
-    /// Starts video recording with comprehensive error handling.
+    /// Starts video recording with full error handling.
     ///
-    /// This method provides a safe way to start video recording with automatic
-    /// permission checking, camera availability validation, and proper error handling.
+    /// Requests microphone access when it has not been determined yet, starts
+    /// the session if necessary, and begins recording to a temporary file.
     /// The recording continues until `stopVideoRecording()` is called.
     ///
-    /// ## Usage
-    ///
-    /// ```swift
-    /// let result = await cameraService.startVideoRecording()
-    /// switch result {
-    /// case .success:
-    ///     print("Recording started")
-    /// case .failure(let error):
-    ///     print("Failed to start recording: \(error)")
-    /// }
-    /// ```
-    ///
-    /// - Returns: `Result<Void, CameraError>` indicating success or failure.
-    /// - Note: Use `stopVideoRecording()` to stop and receive the completed video URL.
+    /// - Returns: `.success` when recording begins, or a `.failure`
+    ///   describing why recording could not be started.
     public func startVideoRecording() async -> Result<Void, CameraError> {
-        // Check permissions first
         guard authorizationStatus == .authorized else {
             return .failure(.permissionDenied)
-        }
-
-        // Prevent concurrent recording starts
-        if videoRecordingContinuation != nil {
-            return .failure(.recordingFailed)
         }
 
         // Lazily request audio permission if not yet determined
@@ -162,87 +137,43 @@ extension CameraService {
             return .failure(.microphonePermissionDenied)
         }
 
-        // Check camera availability
         guard isCameraAvailable else {
             return .failure(.deviceNotAvailable)
         }
 
-        // Ensure session is running - await properly to avoid race
         if !isRunning {
             guard await start() else {
                 return .failure(.configurationFailed)
             }
         }
 
-        // Start recording
-        startRecordingVideo()
-        return .success(())
+        return await startRecordingVideo()
     }
 
-    /// Stops video recording and returns the completed video file URL.
+    /// Stops the in-progress video recording.
     ///
-    /// This method stops the current video recording session and returns
-    /// the URL of the completed video file. The video is saved
-    /// to the device's documents directory.
-    ///
-    /// ## Usage
-    ///
-    /// ```swift
-    /// let result = await cameraService.stopVideoRecording()
-    /// switch result {
-    /// case .success(let url):
-    ///     print("Video saved to: \(url)")
-    /// case .failure(let error):
-    ///     print("Failed to stop recording: \(error)")
-    /// }
-    /// ```
-    ///
-    /// - Returns: `Result<URL, CameraError>` containing video URL or error information.
-    /// - Note: This method should only be called after `startVideoRecording()` succeeds.
-    @concurrent
+    /// - Returns: `.success` with the completed file URL, or a `.failure`
+    ///   describing why the recording could not be finalized.
     public func stopVideoRecording() async -> Result<URL, CameraError> {
-        return await withCheckedContinuation { continuation in
-            sessionQueue.async { [self] in
-                guard videoRecordingContinuation == nil else {
-                    continuation.resume(returning: .failure(.recordingFailed))
-                    return
-                }
-
-                guard let movieFileOutput = self.movieFileOutput, movieFileOutput.isRecording else {
-                    continuation.resume(returning: .failure(.recordingFailed))
-                    return
-                }
-
-                videoRecordingContinuation = continuation
-                movieFileOutput.stopRecording()
-                playRecordingStopSound()
-            }
-        }
+        await stopRecordingVideo()
     }
 
-    /// Initializes the camera service for use with comprehensive setup.
+    /// Initializes the camera service for use.
     ///
-    /// This method performs complete camera initialization including permission checking,
-    /// device discovery, session configuration, and preview stream setup.
-    /// It's the recommended method to prepare the camera for use.
+    /// Performs the complete initialization sequence: permission checking and
+    /// requesting, notification observation, capture file hygiene, device
+    /// discovery, session configuration, lens state publication, and preview
+    /// stream setup.
     ///
-    /// ## Usage
+    /// - Returns: `.success` once the session is running and the preview
+    ///   pipeline is active, or a `.failure` describing why initialization
+    ///   could not complete.
     ///
-    /// ```swift
-    /// let result = await cameraService.initializeCamera()
-    /// switch result {
-    /// case .success:
-    ///     print("Camera ready for use")
-    /// case .failure(let error):
-    ///     print("Camera initialization failed: \(error)")
-    /// }
-    /// ```
-    ///
-    /// - Returns: `Result<Void, CameraError>` indicating initialization success or failure.
-    /// - Note: After successful initialization, preview frames are available via `previewStream`.
+    /// - Note: Call `cleanupCamera()` when the camera UI disappears; call
+    ///   this method again to re-initialize afterwards.
     public func initializeCamera() async -> Result<Void, CameraError> {
         // Clear any previous session error
-        await MainActor.run { sessionError = nil }
+        sessionError = nil
 
         if authorizationStatus == .notDetermined {
             await requestCameraAccess()
@@ -254,13 +185,23 @@ extension CameraService {
             return .failure(.deviceNotAvailable)
         }
 
-        // Setup session observers
-        setupSessionObservers()
+        // Start observing runtime notifications via the engine.
+        await engine.startObservingNotifications()
+
+        // Purge capture files left behind by previous sessions (older than
+        // 24 hours). Runs off the main actor; consumers are expected to have
+        // consumed URLs they were given long before then.
+        purgeStaleCaptureFiles()
 
         // Start session and wait for it to be running
         guard await start() else {
             return .failure(.configurationFailed)
         }
+
+        // The active device is now known — publish its lens state.
+        lensCount = engine.lensCountSnapshot()
+        lensMagnifications = engine.lensMagnificationsSnapshot()
+        selectedLensIndex = engine.selectedLensIndexSnapshot()
 
         // Run preview loop detached so initializeCamera() can return
         Task { await handleCameraPreviews() }
@@ -270,79 +211,52 @@ extension CameraService {
 
     /// Cleans up camera resources and stops all operations.
     ///
-    /// This method properly shuts down the camera service, stops the capture session,
-    /// removes observers, and releases resources. It should be called when
-    /// the camera is no longer needed to prevent memory leaks and battery drain.
+    /// Cancels the preview loop and notification observers, stops the capture
+    /// session, and resets all published state to its defaults.
     ///
-    /// ## Usage
-    ///
-    /// ```swift
-    /// // When view disappears or app goes to background
-    /// cameraService.cleanupCamera()
-    /// ```
-    ///
-    /// - Note: After calling this method, you must call `initializeCamera()` again before using the camera.
-    public func cleanupCamera() {
-        stop()
-        removeSessionObservers()
+    /// - Note: After calling this method, you must call `initializeCamera()`
+    ///   again before using the camera.
+    public func cleanupCamera() async {
+        await engine.cleanup()
 
-        // Finish old streams so consumers terminate
-        photoContinuation?.finish()
-        movieContinuation?.finish()
-        previewContinuation?.finish()
-
-        // Recreate streams for potential re-initialization
-        createStreams()
-
-        // Reset all state variables for clean initialization
-        isCaptureSessionConfigured = false
-        captureDevice = nil
-        deviceInput = nil
-        audioInput = nil
-        photoOutput = nil
-        movieFileOutput = nil
-        videoOutput = nil
-
-        // Reset flash/torch modes to defaults
-        photoFlashMode = .off
-        videoTorchMode = .off
-        captureMode = .photo
-
-        // Reset other state
+        // Reset facade state
         isCapturingPhoto = false
         isPreviewPaused = false
-        isPreviewRunning = false
         isSessionInterrupted = false
+        isSwitchingCaptureMode = false
         sessionError = nil
         previewImage = nil
+        previewAspectRatio = nil
+        lensCount = 1
+        lensMagnifications = []
+        selectedLensIndex = 0
 
-        // Clear continuations on sessionQueue to serialize with delegate callbacks
-        // (AVCapturePhotoOutput and AVCaptureFileOutput delegates fire on sessionQueue)
-        sessionQueue.async { [self] in
-            photoCaptureContinuation?.resume(returning: nil)
-            photoCaptureContinuation = nil
+        // Reset mode and flash/torch to defaults
+        photoFlashMode = .off
+        videoTorchMode = .off
+        // Photo is the preferred default mode whenever it is allowed.
+        captureMode =
+            allowedCaptureModes.contains(.photo)
+            ? .photo
+            : (allowedCaptureModes.first ?? .photo)
 
-            videoRecordingContinuation?.resume(returning: .failure(.userCancelled))
-            videoRecordingContinuation = nil
+        // Cancel preview loop
+        previewLoop?.cancel()
+        previewLoop = nil
+
+        // Recreate the preview stream for potential re-initialization
+        var previewContinuation: AsyncStream<CIImage>.Continuation!
+        previewStream = AsyncStream<CIImage>(bufferingPolicy: .bufferingNewest(1)) { previewContinuation = $0 }
+        // Push the new continuation into the engine so future starts use it.
+        Task { [engine] in
+            await engine.replacePreviewContinuation(previewContinuation)
         }
     }
 
-    /// Returns comprehensive information about current camera state and capabilities.
+    /// Returns comprehensive information about the current camera state.
     ///
-    /// This method provides a snapshot of camera service's current status,
-    /// including availability, permissions, device usage, and feature support.
-    /// Useful for debugging, UI state management, and feature availability checks.
-    ///
-    /// ## Usage
-    ///
-    /// ```swift
-    /// let info = cameraService.getCameraInfo()
-    /// if info.isFlashAvailable {
-    ///     // Show flash controls
-    /// }
-    /// ```
-    ///
-    /// - Returns: `CameraInfo` struct containing current camera state information.
+    /// - Returns: A `CameraInfo` snapshot of availability, authorization,
+    ///   active camera position, flash state, and session status.
     public func getCameraInfo() -> CameraInfo {
         return CameraInfo(
             isAvailable: isCameraAvailable,
@@ -358,11 +272,12 @@ extension CameraService {
 
 // MARK: - Camera Info Model
 
-/// Comprehensive information about current camera state and capabilities.
+/// Comprehensive information about the current camera state and capabilities.
 ///
-/// `CameraInfo` provides a snapshot of camera service's current status,
-/// including availability, permissions, device usage, and feature support.
-/// This struct is useful for debugging, UI state management, and feature availability checks.
+/// ## Platform Availability
+///
+/// - iOS 13.0+
+/// - macOS 10.15+
 public struct CameraInfo {
     /// Whether camera hardware is available on the device.
     public let isAvailable: Bool
@@ -385,16 +300,6 @@ public struct CameraInfo {
     /// Whether the camera capture session is currently running.
     public let isRunning: Bool
 
-    /// Creates a new camera info instance with specified state values.
-    ///
-    /// - Parameters:
-    ///   - isAvailable: Camera hardware availability status
-    ///   - isAuthorized: Camera permission authorization status
-    ///   - isUsingFrontCamera: Front camera usage status
-    ///   - isUsingBackCamera: Back camera usage status
-    ///   - flashMode: Current flash mode setting
-    ///   - isFlashAvailable: Flash capability status
-    ///   - isRunning: Capture session running status
     public init(
         isAvailable: Bool,
         isAuthorized: Bool,
@@ -411,5 +316,35 @@ public struct CameraInfo {
         self.flashMode = flashMode
         self.isFlashAvailable = isFlashAvailable
         self.isRunning = isRunning
+    }
+}
+
+// MARK: - Capture File Hygiene
+
+@available(iOS 13.0, macOS 10.15, *)
+extension CameraService {
+
+    /// Deletes capture files older than 24 hours from the temporary
+    /// directory. The system purges tmp under storage pressure as well; this
+    /// bounds growth within an app's lifetime. Runs off the main actor.
+    fileprivate func purgeStaleCaptureFiles() {
+        Task.detached(priority: .utility) {
+            let temporaryDirectory = FileManager.default.temporaryDirectory
+            let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
+            let files =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: temporaryDirectory,
+                    includingPropertiesForKeys: [.contentModificationDateKey]
+                )) ?? []
+
+            for file in files where file.lastPathComponent.hasPrefix("camera_photo_") {
+                let modified =
+                    (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate ?? .distantPast
+                if modified < cutoff {
+                    try? FileManager.default.removeItem(at: file)
+                }
+            }
+        }
     }
 }

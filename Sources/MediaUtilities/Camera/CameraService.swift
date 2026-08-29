@@ -6,27 +6,30 @@
 //
 
 import AVFoundation
+import CoreImage
 import Foundation
+import Metal
 import SwiftUI
 
 /// A comprehensive camera management service that provides unified access to device cameras
 /// across iOS and macOS platforms with modern Swift concurrency support.
 ///
-/// The `CameraService` handles all camera operations including:
-/// - Device discovery and configuration management
-/// - Live preview streaming with async/await patterns
-/// - Photo and video capture with proper error handling
-/// - Flash mode control and camera switching
-/// - Permission management and status tracking
-/// - Thread-safe operations using dedicated dispatch queues
+/// `CameraService` is a thin `@MainActor` facade over an internal `actor CameraEngine` that
+/// owns the AVFoundation capture pipeline. All session mutations are serialized inside the
+/// engine; the facade exposes `@Published` properties for SwiftUI and bridges async streams
+/// for downstream consumers.
+///
 ///
 /// ## Architecture
-///
-/// The service uses a modular architecture with separate extensions for different concerns:
-/// - **Capture Operations**: Photo/video recording and session management
-/// - **Delegate Handling**: AVFoundation delegate implementations
-/// - **High-Level Intents**: User-friendly async APIs with Result types
-/// - **Permission Management**: Camera access request handling
+/// - **Capture Operations**: Photo/video recording and session management live in
+///   `CameraService+Capture.swift`, which trampolines to the engine.
+/// - **Delegate Handling**: Internal delegate classes (`PhotoCaptureDelegate`,
+///   `MovieRecordingDelegate`, `VideoDataOutputDelegate`) implement the AVFoundation
+///   delegate protocols and forward results to the engine via continuations.
+/// - **High-Level Intents**: User-friendly async APIs in `CameraService+Intents.swift`.
+/// - **Permission Management**: `CameraService+Permissions.swift`.
+/// - **Helpers**: `CameraService+Helpers.swift` contains snapshot accessors and stream
+///   bridging helpers.
 ///
 /// ## Usage
 ///
@@ -34,7 +37,7 @@ import SwiftUI
 /// let cameraService = CameraService(allowedCaptureModes: [.photo, .video])
 /// await cameraService.initializeCamera()
 ///
-/// let result = await cameraService.capturePhotoWithCompletion()
+/// let result = await cameraService.capturePhoto()
 /// switch result {
 /// case .success(let url):
 ///     print("Photo saved to: \(url)")
@@ -45,8 +48,8 @@ import SwiftUI
 ///
 /// ## Thread Safety
 ///
-/// All camera operations are performed on a dedicated `sessionQueue` to ensure thread safety.
-/// UI updates should be performed on the main thread using `@MainActor` or `DispatchQueue.main`.
+/// The facade is `@MainActor`-isolated. All AVFoundation mutations are funneled through the
+/// `CameraEngine` actor; this is enforced by the Swift compiler, not by convention.
 ///
 /// ## Platform Availability
 ///
@@ -55,335 +58,367 @@ import SwiftUI
 /// - Some features (like flash) are iOS-only
 ///
 @available(iOS 13.0, macOS 10.15, *)
-public final class CameraService: NSObject, ObservableObject, Sendable {
+@MainActor
+public final class CameraService: ObservableObject {
 
     // MARK: - Core Properties
 
-    @Published var previewImage: Image?
-    let captureSession = AVCaptureSession()
-    var isCaptureSessionConfigured = false
-    var deviceInput: AVCaptureDeviceInput?
-    var audioInput: AVCaptureDeviceInput?
-    var photoOutput: AVCapturePhotoOutput?
-    var movieFileOutput: AVCaptureMovieFileOutput?
-    var videoOutput: AVCaptureVideoDataOutput?
-    let sessionQueue: DispatchQueue
-    let allowedCaptureModes: Set<CaptureMode>
+    /// The internal AVFoundation owner. All session mutations are serialized inside this actor.
+    let engine: CameraEngine
+
+    /// The active capture configuration.
+    public let configuration: CaptureConfiguration
+
+    /// The capture modes that are allowed by the configuration (photo and/or video).
+    public var allowedCaptureModes: Set<CaptureMode> {
+        configuration.allowedCaptureModes
+    }
 
     // MARK: - Public Observable Properties
 
-    /// The current flash mode setting for the camera.
+    /// The most recent preview frame as a SwiftUI `Image`.
     ///
-    /// This computed property returns the appropriate flash/torch mode based on current capture mode.
-    /// For photo mode: returns photoFlashMode
-    /// For video mode: returns videoTorchMode
-    /// Changes to this property are automatically reflected in the UI.
-    /// - Note: Flash is only available on iOS devices that support it.
-    public var flashMode: AVCaptureDevice.FlashMode {
-        get {
-            return captureMode == .photo ? photoFlashMode : videoTorchMode
-        }
-        set {
-            if captureMode == .photo {
-                photoFlashMode = newValue
-            } else {
-                videoTorchMode = newValue
-            }
-        }
-    }
+    /// Updated on the main actor by `handleCameraPreviews()` which reads `previewStream`.
+    @Published public var previewImage: Image?
+
+    /// The width/height ratio of the most recent preview frame.
+    ///
+    /// Published alongside `previewImage` so consumers can drive an animated
+    /// `aspectRatio` modifier: switching capture modes changes the session
+    /// format (4:3 photo ↔ 16:9 video), and animating the ratio turns that
+    /// layout change into a smooth resize instead of a jump.
+    @Published public internal(set) var previewAspectRatio: CGFloat?
 
     /// Flash mode for photo capture (preserved when switching modes).
     var photoFlashMode: AVCaptureDevice.FlashMode = .off
 
     /// Torch mode for video recording (preserved when switching modes).
-    /// Helper to have the same functionality instead of having a different implementation for TorchMode
     var videoTorchMode: AVCaptureDevice.FlashMode = .off
 
+    /// The current flash/torch mode reading the right backing variable for the current mode.
+    public var flashMode: AVCaptureDevice.FlashMode {
+        get { captureMode == .photo ? photoFlashMode : videoTorchMode }
+        set {
+            if captureMode == .photo {
+                photoFlashMode = newValue
+            } else {
+                videoTorchMode = newValue
+                // For video mode, activate/deactivate torch immediately (like iPhone Camera app)
+                let mode = newValue
+                Task { [engine] in
+                    await engine.applyTorchImmediately(mode: mode)
+                }
+            }
+        }
+    }
+
     /// Indicates whether a photo capture operation is currently in progress.
-    ///
-    /// This property is automatically updated during photo capture operations
-    /// and can be used to show loading states or prevent multiple simultaneous captures.
     @Published public var isCapturingPhoto: Bool = false
+
+    /// `true` while a capture-mode change is reconfiguring the session.
+    ///
+    /// Switching between photo and video commits a new session preset, which
+    /// forces a device format change and briefly interrupts the frame flow.
+    /// The camera interface uses this to soften the transition (defocusing
+    /// the preview) while the engine settles the new format.
+    @Published public internal(set) var isSwitchingCaptureMode = false
 
     /// Controls whether the camera preview is currently paused.
     ///
     /// When set to `true`, the preview stream stops delivering new frames
     /// but the capture session remains active. This can be useful for
     /// performance optimization or when the camera view is not visible.
-    @Published public var isPreviewPaused = false
+    @Published public var isPreviewPaused: Bool = false {
+        didSet {
+            let paused = isPreviewPaused
+            Task { [engine] in
+                await engine.setPreviewPaused(paused)
+            }
+        }
+    }
 
     /// The current capture mode (photo or video).
     ///
     /// This property tracks whether the camera interface is in photo or video mode.
-    /// It's used to determine flash vs torch behavior.
+    /// It's used to determine flash vs torch behavior and the session preset.
     /// When switching to video mode, torch is set to off by default.
-    @Published public var captureMode: CaptureMode = .photo {
+    @Published public var captureMode: CaptureMode {
         didSet {
-            updateTorchForCurrentMode()
+            // Push the new mode into the engine for session-preset decisions.
+            let mode = captureMode
+            if oldValue != mode {
+                isSwitchingCaptureMode = true
+            }
+            Task { [engine, weak self] in
+                await engine.setCaptureModeForWiring(mode)
+                if oldValue != mode {
+                    await engine.applySessionPresetForMode(mode)
+                    await MainActor.run { [weak self] in
+                        self?.isSwitchingCaptureMode = false
+                    }
+                }
+            }
         }
     }
 
     /// Indicates whether the camera session is currently interrupted
     /// (e.g., by a phone call or another app using the camera).
-    @Published public var isSessionInterrupted = false
+    @Published public var isSessionInterrupted: Bool = false
 
     /// The last session-level error (e.g., camera disconnected).
     /// Set automatically by runtime error handlers. Cleared on initialization and cleanup.
     @Published public var sessionError: CameraError?
 
-    // MARK: - Audio Device Properties
+    /// The number of lenses available on the active camera. Multi-lens
+    /// (virtual) devices — dual and triple cameras — expose their constituent
+    /// lenses here; single-lens devices report 1.
+    @Published public internal(set) var lensCount: Int = 1
 
-    var audioDevice: AVCaptureDevice? {
-        return AVCaptureDevice.default(for: .audio)
-    }
+    /// The display magnification of each lens (e.g. `[0.5, 1, 3]`), aligned
+    /// with `lensCount`. Empty on single-lens devices.
+    @Published public internal(set) var lensMagnifications: [CGFloat] = []
 
-    // MARK: - Device Properties
-
-    private var allCaptureDevices: [AVCaptureDevice] {
-        #if os(iOS)
-        AVCaptureDevice.DiscoverySession(
-            deviceTypes: [
-                .builtInTrueDepthCamera,
-                .builtInDualCamera,
-                .builtInDualWideCamera,
-                .builtInWideAngleCamera,
-            ],
-            mediaType: .video,
-            position: .unspecified
-        ).devices
-        #elseif os(macOS)
-        AVCaptureDevice.DiscoverySession(
-            deviceTypes: [
-                .builtInWideAngleCamera
-            ],
-            mediaType: .video,
-            position: .unspecified
-        ).devices
-        #endif
-    }
-
-    private var frontCaptureDevices: [AVCaptureDevice] {
-        allCaptureDevices.filter { $0.position == .front }
-    }
-
-    private var backCaptureDevices: [AVCaptureDevice] {
-        allCaptureDevices.filter { $0.position == .back }
-    }
-
-    private var captureDevices: [AVCaptureDevice] {
-        var devices = [AVCaptureDevice]()
-        #if os(iOS)
-        // Prefer back camera with .builtInWideAngleCamera device type (standard 1x zoom)
-        let sortedBackDevices = backCaptureDevices.sorted { device1, device2 in
-            if device1.deviceType == .builtInWideAngleCamera && device2.deviceType != .builtInWideAngleCamera {
-                return true
-            } else if device2.deviceType == .builtInWideAngleCamera && device1.deviceType != .builtInWideAngleCamera {
-                return false
-            } else {
-                // If both are the same type or neither is wide angle, maintain original order
-                return false
-            }
-        }
-        if let backDevice = sortedBackDevices.first {
-            devices += [backDevice]
-        }
-        #else
-        // On macOS, just use the first available back camera
-        if let backDevice = backCaptureDevices.first {
-            devices += [backDevice]
-        }
-        #endif
-        if let frontDevice = frontCaptureDevices.first {
-            devices += [frontDevice]
-        }
-        return devices
-    }
-
-    var availableCaptureDevices: [AVCaptureDevice] {
-        if #available(iOS 14.0, *) {
-            captureDevices
-                .filter { $0.isConnected }
-                .filter { !$0.isSuspended }
-        } else {
-            captureDevices
-                .filter { $0.isConnected }
-        }
-    }
-
-    var captureDevice: AVCaptureDevice? {
-        didSet {
-            guard let captureDevice = captureDevice else { return }
-            sessionQueue.async {
-                self.updateSessionForCaptureDevice(captureDevice)
-            }
-        }
-    }
+    /// The index of the currently selected lens, in `0 ..< lensCount`.
+    @Published public internal(set) var selectedLensIndex: Int = 0
 
     // MARK: - Public Computed Properties
 
     /// A Boolean value indicating whether the camera capture session is currently running.
-    ///
-    /// When `true`, the camera is actively capturing and providing preview frames.
-    /// When `false`, the session is stopped and no camera operations are active.
     public var isRunning: Bool {
-        captureSession.isRunning
+        engine.isRunningSnapshot()
     }
 
     /// A Boolean value indicating whether the front-facing camera is currently active.
-    ///
-    /// Returns `true` if the current capture device is positioned on the front of the device,
-    /// suitable for selfies and video calls. Returns `false` if back camera is active
-    /// or no camera is selected.
     public var isUsingFrontCaptureDevice: Bool {
-        guard let captureDevice = captureDevice else { return false }
-        return frontCaptureDevices.contains(captureDevice)
+        engine.isUsingFrontCaptureDeviceNow()
     }
 
     /// A Boolean value indicating whether the back-facing camera is currently active.
-    ///
-    /// Returns `true` if the current capture device is positioned on the back of the device,
-    /// typically used for standard photography and video recording. Returns `false`
-    /// if front camera is active or no camera is selected.
     public var isUsingBackCaptureDevice: Bool {
-        guard let captureDevice = captureDevice else { return false }
-        return backCaptureDevices.contains(captureDevice)
+        engine.isUsingBackCaptureDeviceNow()
     }
 
     /// A Boolean value indicating whether the current camera device supports flash.
-    ///
-    /// Returns `true` if the currently selected camera device has flash capabilities.
-    /// Flash is typically available on back cameras but not on front cameras.
-    /// This property updates automatically when switching between cameras.
     public var isFlashAvailable: Bool {
-        guard let captureDevice = captureDevice else { return false }
-        return captureDevice.isFlashAvailable
+        engine.isFlashAvailableNow()
     }
 
     /// A Boolean value indicating whether the current camera device supports torch.
-    ///
-    /// Returns `true` if the currently selected camera device has torch capabilities.
-    /// Torch is used for continuous lighting during video recording.
-    /// This property updates automatically when switching between cameras.
     public var isTorchAvailable: Bool {
-        guard let captureDevice = captureDevice else { return false }
-        return captureDevice.isTorchAvailable
+        engine.isTorchAvailableNow()
     }
 
     /// The current authorization status for camera access.
-    ///
-    /// This property returns the current permission status for camera access
-    /// without triggering a permission request. Use `requestCameraAccess()`
-    /// to prompt the user for permission if needed.
     public var authorizationStatus: AVAuthorizationStatus {
         AVCaptureDevice.authorizationStatus(for: .video)
     }
 
-    /// This property returns the current permission status for microphone access
-    /// without triggering a permission request. Use `requestCameraAccess()`
-    /// to prompt the user for permission if needed.
+    /// The current microphone authorization status.
     public var microphoneAuthorizationStatus: AVAuthorizationStatus {
         AVCaptureDevice.authorizationStatus(for: .audio)
     }
 
-    /// A Boolean value indicating whether any camera devices are available on the current device.
-    ///
-    /// Returns `true` if the device has at least one available camera that can be used
-    /// for capture operations. Returns `false` if no cameras are detected or all cameras
-    /// are unavailable (disconnected or suspended).
     /// A Boolean value indicating whether any camera devices are available and authorized.
-    ///
-    /// Returns `true` if the device has at least one available camera that can be used
-    /// for capture operations AND camera access has been authorized by the user.
-    /// Returns `false` if no cameras are detected, all cameras are unavailable,
-    /// or camera access has not been granted.
     public var isCameraAvailable: Bool {
-        authorizationStatus == .authorized && !availableCaptureDevices.isEmpty
+        authorizationStatus == .authorized && !engine.availableCaptureDevices().isEmpty
     }
 
     /// A Boolean value indicating whether camera and microphone are both available and authorized.
-    ///
-    /// Returns `true` if the device has camera access AND microphone access (for video recording with audio).
-    /// Returns `false` if either camera or microphone access has not been granted.
-    /// This is useful for checking if video recording with audio is possible.
     public var isCameraAndMicrophoneAvailable: Bool {
-        authorizationStatus == .authorized && microphoneAuthorizationStatus == .authorized
-            && !availableCaptureDevices.isEmpty
+        authorizationStatus == .authorized
+            && microphoneAuthorizationStatus == .authorized
+            && !engine.availableCaptureDevices().isEmpty
+    }
+
+    /// `true` when the movie file output is currently recording.
+    public var isRecording: Bool {
+        engine.isRecordingSnapshot()
+    }
+
+    /// The duration of the current recording, in seconds. Returns 0 when not recording.
+    public var recordedDurationSeconds: Double {
+        engine.recordedDurationSecondsSnapshot()
     }
 
     // MARK: - Async Streams
 
-    var previewContinuation: AsyncStream<CIImage>.Continuation?
-
     /// An async stream that delivers live camera preview frames.
     ///
-    /// Provides `CIImage` objects at approximately 30 FPS.
-    /// Use `previewStream.map { $0.image }` to convert to SwiftUI `Image`.
-    /// The stream is recreated on `cleanupCamera()` and is safe for re-initialization.
-    private(set) var previewStream: AsyncStream<CIImage>!
-
-    var photoContinuation: AsyncStream<AVCapturePhoto>.Continuation?
+    /// Provides raw `CIImage` objects at approximately 30 FPS. The frames are
+    /// sensor-oriented (not rotated or mirrored); the internal preview loop
+    /// applies rotation and front-camera mirroring when building
+    /// `previewImage`. The stream buffers only the newest frame, and is
+    /// recreated on `cleanupCamera()`.
+    public var previewStream: AsyncStream<CIImage>!
 
     /// An async stream that delivers captured photos as they become available.
-    ///
-    /// Provides `AVCapturePhoto` objects after each successful capture.
-    /// The stream is recreated on `cleanupCamera()` and is safe for re-initialization.
-    private(set) var photoStream: AsyncStream<AVCapturePhoto>!
-
-    var movieContinuation: AsyncStream<URL>.Continuation?
+    public private(set) var photoStream: AsyncStream<AVCapturePhoto>!
 
     /// An async stream that delivers URLs of completed video recordings.
-    ///
-    /// Each URL points to a video file in the device's documents directory.
-    /// The stream is recreated on `cleanupCamera()` and is safe for re-initialization.
     public private(set) var movieFileStream: AsyncStream<URL>!
 
-    // MARK: - Continuations
+    // MARK: - Preview Handling
 
-    var photoCaptureContinuation: CheckedContinuation<URL?, Never>?
-    var videoRecordingContinuation: CheckedContinuation<Result<URL, CameraError>, Never>?
-
-    // MARK: - Preview Guard
-
-    var isPreviewRunning = false
-
-    // MARK: - Stream Creation
-
-    func createStreams() {
-        var pc: AsyncStream<CIImage>.Continuation!
-        previewStream = AsyncStream { pc = $0 }
-        previewContinuation = pc
-
-        var phc: AsyncStream<AVCapturePhoto>.Continuation!
-        photoStream = AsyncStream { phc = $0 }
-        photoContinuation = phc
-
-        var mc: AsyncStream<URL>.Continuation!
-        movieFileStream = AsyncStream { mc = $0 }
-        movieContinuation = mc
-    }
+    var previewLoop: Task<Void, Never>?
 
     // MARK: - Initialization
 
-    public init(
-        allowedCaptureModes: Set<CaptureMode>
-    ) {
-        sessionQueue = DispatchQueue(label: "MediaUtilities.CameraService.sessionQueue")
-        self._captureMode = .init(initialValue: allowedCaptureModes.first ?? .photo)
-        self.allowedCaptureModes = allowedCaptureModes
+    /// Creates a camera service with the given capture configuration.
+    ///
+    /// - Parameter configuration: Describes the allowed capture modes, photo
+    ///   quality and resolution, initial camera position, and audio behavior.
+    public init(configuration: CaptureConfiguration = CaptureConfiguration()) {
+        // Photo is the preferred opening mode whenever it is allowed; the
+        // mode set's iteration order is otherwise unspecified.
+        let initialMode: CaptureMode =
+            configuration.allowedCaptureModes.contains(.photo)
+            ? .photo
+            : (configuration.allowedCaptureModes.first ?? .photo)
+        self.configuration = configuration
+        self._captureMode = .init(initialValue: initialMode)
 
-        super.init()
+        // Create streams up front so consumers can subscribe before initializeCamera.
+        // Newest-frame buffering: a slow consumer drops stale frames instead
+        // of queueing them, keeping memory flat and the preview live.
+        var previewContinuation: AsyncStream<CIImage>.Continuation!
+        let previewStream = AsyncStream<CIImage>(bufferingPolicy: .bufferingNewest(1)) { previewContinuation = $0 }
+        self.previewStream = previewStream
 
-        createStreams()
+        var photoContinuation: AsyncStream<AVCapturePhoto>.Continuation!
+        let photoStream = AsyncStream<AVCapturePhoto> { photoContinuation = $0 }
+        self.photoStream = photoStream
 
-        captureSession.sessionPreset = .high
-        captureDevice = availableCaptureDevices.first ?? AVCaptureDevice.default(for: .video)
+        var movieContinuation: AsyncStream<URL>.Continuation!
+        let movieStream = AsyncStream<URL> { movieContinuation = $0 }
+        self.movieFileStream = movieStream
+
+        // Build a placeholder state handler; we wire the real one after `self`
+        // is fully initialized.
+        let placeholderStateHandler = CameraEngineStateHandler(
+            didInterrupt: {},
+            didEndInterruption: {},
+            didFail: { _ in }
+        )
+
+        self.engine = CameraEngine(
+            configuration: configuration,
+            captureMode: initialMode,
+            stateHandler: placeholderStateHandler,
+            previewStreamContinuation: previewContinuation,
+            photoStreamContinuation: photoContinuation,
+            movieStreamContinuation: movieContinuation
+        )
+
+        // Seed the engine's capture mode so the first wireSession picks the right preset.
+        let engine = self.engine
+        Task { [engine] in
+            await engine.setCaptureModeForWiring(initialMode)
+        }
+
+        // Wire the real state handler so engine state changes update our
+        // @Published properties. We do this in a Task because the closures
+        // need to capture `self` after init has fully completed.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let realStateHandler = CameraEngineStateHandler(
+                didInterrupt: { [weak self] in self?.isSessionInterrupted = true },
+                didEndInterruption: { [weak self] in self?.isSessionInterrupted = false },
+                didFail: { [weak self] error in self?.sessionError = error }
+            )
+            await self.engine.replaceStateHandler(realStateHandler)
+        }
     }
 
-    deinit {
-        photoCaptureContinuation?.resume(returning: nil)
-        videoRecordingContinuation?.resume(returning: .failure(.unknown("Camera service deallocated")))
-        photoContinuation?.finish()
-        movieContinuation?.finish()
-        previewContinuation?.finish()
+    /// Creates a camera service restricted to the given capture modes, with
+    /// all other configuration values at their defaults.
+    ///
+    /// - Parameter allowedCaptureModes: Capture modes available in the interface.
+    public convenience init(allowedCaptureModes: Set<CaptureMode>) {
+        self.init(configuration: CaptureConfiguration(allowedCaptureModes: allowedCaptureModes))
+    }
+
+    // MARK: - Internal Helpers
+
+    /// Runs the preview → SwiftUI Image conversion loop.
+    /// Called by `initializeCamera()` and re-armed after `cleanupCamera()`.
+    ///
+    /// Each frame is rendered to a `CGImage` with a shared `CIContext` before
+    /// being published. This must happen eagerly: `UIImage(ciImage:)` wraps the
+    /// `CIImage` lazily and has no `CGImage` backing, so SwiftUI's
+    /// `Image(uiImage:)` has nothing to rasterize and the preview stays black.
+    /// The loop runs detached from the main actor so the per-frame Core Image
+    /// render doesn't block the UI.
+    func handleCameraPreviews() async {
+        guard previewLoop == nil else { return }
+        let stream = previewStream!
+        let engine = self.engine
+        previewLoop = Task.detached(priority: .userInitiated) { [weak self] in
+            // Prefer a Metal-backed context: rendering preview frames on the
+            // GPU is considerably cheaper than the CPU path at 30fps. Falls
+            // back to the default context where Metal is unavailable.
+            let ciContext: CIContext
+            if let metalDevice = MTLCreateSystemDefaultDevice() {
+                ciContext = CIContext(mtlDevice: metalDevice)
+            } else {
+                ciContext = CIContext()
+            }
+            for await rawImage in stream {
+                guard let self, !Task.isCancelled else { return }
+
+                // The video data output connection is pinned to 0° and never
+                // mirrored (see `updateVideoOutputConnection`), so rotation and
+                // front-camera mirroring are applied here on the raw buffer.
+                // The angle comes from the coordinator's *capture* angle: for a
+                // raw buffer it is the same horizon-level angle, and it is the
+                // value that already produces straight photos. The coordinator's
+                // *preview* angle is derived from the preview layer's geometry -
+                // our synthetic, never-rendered layer reports 0 for the back
+                // camera, which is what left the preview sideways by 90°.
+                let upright = rawImage.uprightPreview(
+                    rotationAngle: engine.captureRotationAngle,
+                    mirrored: engine.isUsingFrontCaptureDeviceNow()
+                )
+                guard let cgImage = ciContext.createCGImage(upright, from: upright.extent) else {
+                    continue
+                }
+                let image = Image(decorative: cgImage, scale: 1, orientation: .up)
+                let aspectRatio = CGFloat(cgImage.width) / CGFloat(cgImage.height)
+                await MainActor.run {
+                    if self.previewAspectRatio != aspectRatio {
+                        self.previewAspectRatio = aspectRatio
+                    }
+                    self.previewImage = image
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Preview Frame Conversion
+
+@available(iOS 13.0, macOS 10.15, *)
+extension CIImage {
+    /// Rotates a raw (0°) sensor buffer upright for preview display and
+    /// optionally mirrors it horizontally (front camera).
+    ///
+    /// `rotationAngle` is the clockwise horizon-level angle reported by the
+    /// rotation coordinator (the *capture* angle - see `handleCameraPreviews`),
+    /// or 90 by default on OS versions without a coordinator.
+    fileprivate func uprightPreview(rotationAngle: CGFloat, mirrored: Bool) -> CIImage {
+        let orientation: CGImagePropertyOrientation
+        switch rotationAngle {
+            case 90: orientation = .right
+            case 180: orientation = .down
+            case 270: orientation = .left
+            default: orientation = .up
+        }
+        let upright = oriented(orientation)
+        guard mirrored else { return upright }
+
+        // Horizontal flip within the same extent: x → width - x.
+        return
+            upright
+            .transformed(by: CGAffineTransform(scaleX: -1, y: 1))
+            .transformed(by: CGAffineTransform(translationX: upright.extent.width, y: 0))
     }
 }

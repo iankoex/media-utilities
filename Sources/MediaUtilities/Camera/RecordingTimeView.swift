@@ -7,8 +7,14 @@
 
 import SwiftUI
 
+/// A compact overlay showing the elapsed recording time.
+///
+/// `RecordingTimeView` renders a formatted timestamp (`HH:mm:ss`) on a
+/// rounded badge. `CameraCaptureView` displays it while a video recording
+/// is in progress.
 @available(iOS 14.0, macOS 11.0, *)
 struct RecordingTimeView: View {
+    /// The elapsed recording time in seconds.
     let time: Double
 
     var body: some View {
@@ -19,6 +25,7 @@ struct RecordingTimeView: View {
 }
 
 extension TimeInterval {
+    /// Formats the interval as a zero-padded `HH:mm:ss` string.
     fileprivate var formatted: String {
         let time = Int(self)
         let seconds = time % 60

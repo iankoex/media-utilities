@@ -40,6 +40,6 @@ extension View {
 
 @available(iOS 13.0, macOS 10.15, *)
 private struct SizePreferenceKey: PreferenceKey {
-    static var defaultValue: CGSize = .zero
+    static let defaultValue: CGSize = .zero
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) {}
 }

@@ -8,400 +8,124 @@
 import AVFoundation
 import Foundation
 
-#if os(iOS)
-import AudioToolbox
-#endif
-
 // MARK: - Capture Operations
 
+/// Capture lifecycle and device-control operations for `CameraService`.
+///
+/// This extension groups the service's capture operations: starting and
+/// stopping the capture session, switching cameras and lenses, capturing
+/// still photos, and recording video. Every operation forwards to the
+/// internal `CameraEngine` actor, which serializes all AVFoundation work;
+/// results are delivered through `async` returns and `Result` values.
+///
+/// ## Usage
+///
+/// ```swift
+/// // Start the session, then capture a photo
+/// guard await cameraService.start() else { return }
+/// let result = await cameraService.capturePhoto()
+///
+/// // Record a video clip
+/// if case .success = await cameraService.startVideoRecording() {
+///     let video = await cameraService.stopVideoRecording()
+/// }
+/// ```
 @available(iOS 13.0, macOS 10.15, *)
 extension CameraService {
 
-    /// Starts the camera capture session and begins streaming preview frames.
+    /// Starts the camera capture session.
     ///
-    /// This method configures the capture session if not already configured,
-    /// checks for camera permissions, and starts the session.
-    /// Preview frames will begin flowing through the `previewStream` after this call.
+    /// On first use the session is configured (device input, outputs, and the
+    /// session preset for the active `CaptureMode`); afterwards this simply
+    /// resumes the flow of frames to the preview pipeline and the photo and
+    /// movie outputs.
     ///
-    ///
-    /// ```swift
-    /// let started = await cameraService.start()
-    /// if started {
-    ///     // Preview frames are now available via previewStream
-    /// }
-    /// ```
-    ///
-    /// - Returns: `true` if the session started successfully, `false` otherwise.
-    /// - Note: All session mutations happen on `sessionQueue` to prevent races with `stop()`.
+    /// - Returns: `true` if the session is running; `false` if camera
+    ///   authorization was denied or session configuration failed.
     public func start() async -> Bool {
         guard authorizationStatus == .authorized else { return false }
-
-        return await withCheckedContinuation { continuation in
-            sessionQueue.async { [self] in
-                if isCaptureSessionConfigured {
-                    if !captureSession.isRunning {
-                        captureSession.startRunning()
-                    }
-                    continuation.resume(returning: true)
-                } else {
-                    configureCaptureSession { success in
-                        if success {
-                            self.captureSession.startRunning()
-                        }
-                        continuation.resume(returning: success)
-                    }
-                }
-            }
-        }
+        return await engine.start()
     }
 
     /// Stops the camera capture session and halts preview frame streaming.
     ///
-    /// This method stops the capture session, which stops all camera operations
-    /// including preview streaming, photo capture, and video recording.
-    /// The session can be restarted by calling `start()` again.
-    ///
-    /// ## Usage
-    ///
-    /// ```swift
-    /// cameraService.stop()
-    /// // Preview frames stop flowing through previewStream
-    /// ```
-    ///
-    /// - Note: The stop operation is dispatched to `sessionQueue` to ensure
-    ///   proper ordering with subsequent `start()` calls.
-    public func stop() {
-        guard isCaptureSessionConfigured else { return }
-        sessionQueue.async { [self] in
-            if captureSession.isRunning {
-                captureSession.stopRunning()
-            }
-        }
+    /// The session configuration is preserved — call `start()` to resume
+    /// without reconfiguring.
+    public func stop() async {
+        await engine.stop()
     }
 
     /// Switches between available front and back cameras.
     ///
-    /// This method toggles between the front and back cameras if both are available.
-    /// If only one camera is available, it switches to that camera.
-    /// The capture session is automatically reconfigured for the new device.
+    /// The preview briefly freezes across the switch so transitional frames
+    /// never appear, and the lens state (`lensCount`, `selectedLensIndex`,
+    /// `lensMagnifications`) is refreshed for the newly active device.
     ///
-    /// ## Usage
-    ///
-    /// ```swift
-    /// cameraService.switchCamera()
-    /// // Camera switches from front to back or vice versa
-    /// ```
-    ///
-    /// - Note: This method updates `isUsingFrontCaptureDevice` and `isUsingBackCaptureDevice` properties.
-    public func switchCamera() {
-        if let captureDevice = captureDevice, let index = availableCaptureDevices.firstIndex(of: captureDevice) {
-            let nextIndex = (index + 1) % availableCaptureDevices.count
-            self.captureDevice = availableCaptureDevices[nextIndex]
-        } else {
-            self.captureDevice = AVCaptureDevice.default(for: .video)
-        }
+    /// - Note: Skipped while a video recording is in progress.
+    public func switchCamera() async {
+        _ = await engine.switchCamera()
+
+        // The active device (and therefore its lens state) may have changed.
+        lensCount = engine.lensCountSnapshot()
+        lensMagnifications = engine.lensMagnificationsSnapshot()
+        selectedLensIndex = engine.selectedLensIndexSnapshot()
     }
 
-    /// Captures a photo using current camera settings and returns file URL.
+    /// Cycles to the next available lens on the active camera.
     ///
-    /// This method performs a low-level photo capture operation using the current
-    /// camera configuration including flash mode, focus, and exposure settings.
-    /// The captured photo is saved to a temporary file and the URL is returned.
+    /// Lenses advance in ascending magnification order — 1× → 2× → 3× → 0.5×
+    /// → 1× — looping back around after the longest lens.
     ///
-    /// ## Usage
+    /// - Note: Only multi-lens (virtual) devices support lens switching; on
+    ///   single-lens devices this is a no-op.
+    public func switchLens() async {
+        await engine.selectNextLens()
+        selectedLensIndex = engine.selectedLensIndexSnapshot()
+    }
+
+    /// Selects the lens at `index` on the active camera.
     ///
-    /// ```swift
-    /// if let photoURL = await cameraService.capturePhoto() {
-    ///     print("Photo saved to: \(photoURL)")
-    /// }
-    /// ```
-    ///
-    /// - Returns: URL to the captured photo file, or `nil` if capture failed or a capture is already in progress.
-    /// - Note: For user-friendly error handling, use `capturePhotoWithCompletion()` instead.
-    @concurrent
-    public func capturePhoto() async -> URL? {
-        guard let photoOutput = self.photoOutput else {
-            return nil
-        }
-
-        return await withCheckedContinuation { continuation in
-            sessionQueue.async { [self] in
-                guard photoCaptureContinuation == nil else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-
-                var photoSettings = AVCapturePhotoSettings()
-
-                if photoOutput.availablePhotoCodecTypes.contains(.hevc) {
-                    photoSettings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
-                }
-
-                if #available(macOS 13.0, *) {
-                    photoSettings.flashMode = flashMode
-                    #if os(iOS)
-                    if let previewPhotoPixelFormatType = photoSettings.availablePreviewPhotoPixelFormatTypes.first {
-                        photoSettings.previewPhotoFormat = [
-                            kCVPixelBufferPixelFormatTypeKey as String: previewPhotoPixelFormatType
-                        ]
-                    }
-                    #endif  // os(iOS)
-
-                    photoSettings.photoQualityPrioritization = .balanced
-
-                    if let photoOutputVideoConnection = photoOutput.connection(with: .video) {
-                        if #available(iOS 17.0, macOS 14.0, *) {
-                            photoOutputVideoConnection.videoRotationAngle = RotationAngle.portrait.rawValue
-                        } else {
-                            // Fallback on earlier versions
-                        }
-                    }
-                }
-
-                // Store continuation to be called in delegate
-                self.photoCaptureContinuation = continuation
-
-                photoOutput.capturePhoto(with: photoSettings, delegate: self)
-            }
-        }
+    /// - Parameter index: Position of the lens in `lensMagnifications`.
+    /// - Note: No-op when the index is out of range or the device has a
+    ///   single lens.
+    public func selectLens(at index: Int) async {
+        await engine.selectLens(at: index)
+        selectedLensIndex = engine.selectedLensIndexSnapshot()
     }
 
     /// Starts recording video to a temporary file.
     ///
-    /// This method begins video recording using the current camera configuration.
-    /// The video is saved to a temporary file in the documents directory.
-    /// Recording continues until `stopRecordingVideo()` is called.
-    /// Torch mode is automatically configured based on flash settings.
+    /// The recording continues until `stopRecordingVideo()` is called. Use
+    /// `movieFileStream` to receive the URL when recording completes.
     ///
-    /// ## Usage
-    ///
-    /// ```swift
-    /// cameraService.startRecordingVideo()
-    /// // Video recording starts...
-    /// cameraService.stopRecordingVideo()
-    /// ```
-    ///
-    /// - Note: Use `movieFileStream` to receive the URL when recording completes.
-    public func startRecordingVideo() {
-        guard let movieFileOutput = self.movieFileOutput else {
-            return
-        }
-
-        guard !movieFileOutput.isRecording else {
-            return
-        }
-
-        guard
-            let directoryPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        else {
-            return
-        }
-
-        // Torch is already configured by toggleFlashMode() for immediate feedback
-        // No need to configure it again here
-
-        let fileName = UUID().uuidString
-        let filePath = directoryPath.appendingPathComponent(fileName).appendingPathExtension("mp4")
-        movieFileOutput.startRecording(to: filePath, recordingDelegate: self)
-
-        // Play system sound for recording start
-        playRecordingStartSound()
+    /// - Returns: `.success` when recording begins; `.failure(.permissionDenied)`
+    ///   or `.failure(.microphonePermissionDenied)` without authorization,
+    ///   `.failure(.deviceNotAvailable)` without a camera, or
+    ///   `.failure(.recordingFailed)` if the recorder could not start.
+    public func startRecordingVideo() async -> Result<Void, CameraError> {
+        await engine.startRecordingVideo()
     }
 
     /// Stops video recording and finalizes the output file.
     ///
-    /// This method stops the current video recording session and finalizes
-    /// the output file. The completed video URL will be delivered
-    /// through the `movieFileStream` async stream.
-    /// Torch state is preserved after recording stops.
-    ///
-    /// ## Usage
-    ///
-    /// ```swift
-    /// cameraService.startRecordingVideo()
-    /// // Recording in progress...
-    /// cameraService.stopRecordingVideo()
-    /// // URL will be available via movieFileStream
-    /// ```
-    ///
-    /// - Note: This method is a no-op if no recording is in progress.
-    public func stopRecordingVideo() {
-        guard let movieFileOutput = self.movieFileOutput else {
-            return
-        }
-
-        guard movieFileOutput.isRecording else {
-            return
-        }
-
-        // Torch state is preserved - don't turn it off automatically
-        // User can turn it off manually via flash button if desired
-
-        movieFileOutput.stopRecording()
-
-        // Play system sound for recording stop
-        playRecordingStopSound()
+    /// - Returns: `.success` with the file URL, or `.failure(.recordingFailed)`
+    ///   if no recording was in progress or finalization failed.
+    public func stopRecordingVideo() async -> Result<URL, CameraError> {
+        await engine.stopRecordingVideo()
     }
 
-    /// Toggles through available flash modes for the current camera.
+    /// Toggles through the available flash modes: off → on → auto → off.
     ///
-    /// This method cycles through flash modes in the order: off → on → auto → off.
-    /// The method updates the published `flashMode` property.
-    /// For photos: flash activates only during photo capture.
-    /// For videos: torch activates immediately when enabled (like iPhone Camera app).
-    ///
-    /// ## Usage
-    ///
-    /// ```swift
-    /// cameraService.toggleFlashMode()
-    /// print("Flash mode changed to: \(cameraService.flashMode)")
-    /// ```
-    /// 
-    public func toggleFlashMode() {
-        guard isFlashAvailable else {
-            return
+    /// In photo mode the setting applies to the next still. In video mode the
+    /// torch is applied immediately, mirroring the system camera behavior.
+    public func toggleFlashMode() async {
+        let mode = flashMode
+        let next: AVCaptureDevice.FlashMode
+        switch mode {
+            case .off: next = .on
+            case .on: next = .auto
+            default: next = .off
         }
-
-        // Update the appropriate mode based on current capture mode
-        if captureMode == .photo {
-            if photoFlashMode == .off {
-                photoFlashMode = .on
-            } else if photoFlashMode == .on {
-                photoFlashMode = .auto
-            } else {
-                photoFlashMode = .off
-            }
-        } else {
-            if videoTorchMode == .off {
-                videoTorchMode = .on
-            } else if videoTorchMode == .on {
-                videoTorchMode = .auto
-            } else {
-                videoTorchMode = .off
-            }
-
-            // For video mode, activate/deactivate torch immediately (like iPhone Camera app)
-            updateTorchForVideoMode()
-        }
-    }
-
-    /// Plays the system default sound for video recording start.
-    ///
-    /// This provides audio feedback when video recording begins,
-    /// following standard iOS camera app UX patterns.
-    func playRecordingStartSound() {
-        #if os(iOS)
-        // Use system sound for recording start (usually a short beep)
-        AudioServicesPlaySystemSound(1113)  // Standard iOS camera recording start sound
-        #endif
-    }
-
-    /// Plays the system default sound for video recording end.
-    ///
-    /// This provides audio feedback when video recording stops,
-    /// following standard iOS camera app UX patterns.
-    func playRecordingStopSound() {
-        #if os(iOS)
-        // Use system sound for recording stop (usually a different tone)
-        AudioServicesPlaySystemSound(1114)  // Standard iOS camera recording stop sound
-        #endif
-    }
-
-    /// Updates torch state based on current capture mode and settings.
-    ///
-    /// This method ensures the torch state matches the current mode's settings.
-    /// For photo mode: torch is off
-    /// For video mode: torch matches videoTorchMode setting
-    func updateTorchForCurrentMode() {
-        guard let captureDevice = captureDevice, isTorchAvailable else {
-            return
-        }
-
-        do {
-            try captureDevice.lockForConfiguration()
-            defer { captureDevice.unlockForConfiguration() }
-
-            if captureMode == .photo {
-                // In photo mode, ensure torch is off
-                if captureDevice.torchMode != .off {
-                    captureDevice.torchMode = .off
-                }
-            } else {
-                // In video mode, set torch according to videoTorchMode
-                switch videoTorchMode {
-                    case .off:
-                        if captureDevice.torchMode != .off {
-                            captureDevice.torchMode = .off
-                        }
-                    case .on:
-                        captureDevice.torchMode = .on
-                    case .auto:
-                        captureDevice.torchMode = .auto
-                    @unknown default:
-                        captureDevice.torchMode = .off
-                }
-            }
-        } catch {
-            // Torch update failed - continue silently
-        }
-    }
-
-    /// Updates torch state immediately for video mode (like iPhone Camera app).
-    ///
-    /// When in video mode, torch should turn on/off immediately when flash button is pressed,
-    /// providing instant visual feedback to the user.
-    private func updateTorchForVideoMode() {
-        guard captureMode == .video, let captureDevice = captureDevice, isTorchAvailable else {
-            return
-        }
-
-        do {
-            try captureDevice.lockForConfiguration()
-            defer { captureDevice.unlockForConfiguration() }
-
-            switch videoTorchMode {
-                case .off:
-                    if captureDevice.torchMode != .off {
-                        captureDevice.torchMode = .off
-                    }
-                case .on:
-                    captureDevice.torchMode = .on
-                case .auto:
-                    captureDevice.torchMode = .auto
-                @unknown default:
-                    captureDevice.torchMode = .off
-            }
-        } catch {
-            // Torch update failed - continue silently
-        }
-    }
-
-    /// Configures torch mode for video recording based on current flash settings.
-    ///
-    /// This method activates torch during video recording if flash is enabled.
-    /// Torch is only active during actual recording, not just when flash button is pressed.
-    private func configureTorchForVideoRecording() {
-        guard let captureDevice = captureDevice, isTorchAvailable else {
-            return
-        }
-
-        do {
-            try captureDevice.lockForConfiguration()
-            defer { captureDevice.unlockForConfiguration() }
-
-            switch flashMode {
-                case .off:
-                    // Torch remains off
-                    break
-                case .on:
-                    captureDevice.torchMode = .on
-                case .auto:
-                    captureDevice.torchMode = .auto
-                @unknown default:
-                    break
-            }
-        } catch {
-            // Torch configuration failed - continue silently
-        }
+        flashMode = next
     }
 }

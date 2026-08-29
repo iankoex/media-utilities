@@ -231,8 +231,8 @@ public struct CropImageView: View {
             setMinScaleAmount(widthScaleFactor)
             setFinalScaleAmount(widthScaleFactor)
         } else {
-            let sc = max(heightScaleFactor, widthScaleFactor)
-            setMinScaleAmount(sc)
+            let minimumScale = max(heightScaleFactor, widthScaleFactor)
+            setMinScaleAmount(minimumScale)
         }
     }
     

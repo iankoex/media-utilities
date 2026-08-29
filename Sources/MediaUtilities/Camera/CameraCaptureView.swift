@@ -6,7 +6,6 @@
 //
 
 import AVFoundation
-import AVKit
 import SwiftUI
 
 // MARK: - Camera Capture View
@@ -24,9 +23,12 @@ import SwiftUI
 /// ## Usage
 ///
 /// ```swift
-/// CameraCaptureView(
-///     allowedCaptureModes: [.photo, .video]
-/// ) { result in
+/// var configuration = CaptureConfiguration()
+/// configuration.allowedCaptureModes = [.photo, .video]
+/// configuration.photoDimensions = .maximum
+/// configuration.photoQuality = .quality
+///
+/// CameraCaptureView(configuration: configuration) { result in
 ///     switch result {
 ///     case .success(let url):
 ///         // Handle captured media
@@ -45,10 +47,10 @@ import SwiftUI
 /// - Some features (like flash) are iOS-only
 @available(iOS 14.0, macOS 11.0, *)
 public struct CameraCaptureView: View {
-    @StateObject private var cameraService = CameraService(allowedCaptureModes: [.photo])
-    @State private var isRecording = false
+    @StateObject private var cameraService = CameraService()
     @State private var showingPermissionAlert = false
-
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .caption) private var lensLabelSize: CGFloat = 13
 
     /// Callback closure that handles the result of camera capture operations.
     ///
@@ -61,10 +63,27 @@ public struct CameraCaptureView: View {
     @MainActor
     public let onCapture: (Result<URL, CameraError>) -> Void
 
-    /// Creates a new camera capture view with a capture completion handler.
+    /// Creates a new camera capture view with a capture configuration.
     ///
-    /// This initializer sets up the camera interface with the specified completion handler
-    /// that will be called when photos are captured or videos finish recording.
+    /// The configuration describes everything customizable about the capture
+    /// pipeline: allowed capture modes, photo quality and resolution, the
+    /// camera active on first open, and whether video recordings include
+    /// audio. Defaults provide photo + video modes, fast `.balanced` stills,
+    /// and the back camera.
+    ///
+    /// - Parameters:
+    ///   - configuration: Describes how the camera pipeline behaves.
+    ///   - onCapture: A closure that handles the result of capture operations.
+    public init(
+        configuration: CaptureConfiguration = CaptureConfiguration(),
+        onCapture: @escaping (Result<URL, CameraError>) -> Void
+    ) {
+        self.onCapture = onCapture
+        self._cameraService = StateObject(wrappedValue: CameraService(configuration: configuration))
+    }
+
+    /// Creates a new camera capture view restricted to the given capture
+    /// modes, with all other configuration values at their defaults.
     ///
     /// - Parameters:
     ///   - allowedCaptureModes: A set of capture modes that should be available in the camera interface.
@@ -75,8 +94,10 @@ public struct CameraCaptureView: View {
         allowedCaptureModes: Set<CaptureMode> = [.photo, .video],
         onCapture: @escaping (Result<URL, CameraError>) -> Void
     ) {
-        self.onCapture = onCapture
-        self._cameraService = StateObject(wrappedValue: CameraService(allowedCaptureModes: allowedCaptureModes))
+        self.init(
+            configuration: CaptureConfiguration(allowedCaptureModes: allowedCaptureModes),
+            onCapture: onCapture
+        )
     }
 
     public var body: some View {
@@ -111,7 +132,22 @@ public struct CameraCaptureView: View {
         ZStack {
             cameraService.previewImage?
                 .resizable()
-                .aspectRatio(contentMode: .fit)
+                // The frame's aspect changes with the session format on
+                // capture-mode switches (4:3 ↔ 16:9); animating an explicit
+                // ratio turns the layout change into a smooth resize instead
+                // of a jump.
+                .aspectRatio(cameraService.previewAspectRatio, contentMode: .fit)
+                .animation(.easeInOut(duration: 0.2), value: cameraService.previewAspectRatio)
+                // Capture-mode changes reconfigure the session (new preset,
+                // device format, lens restore), which freezes the frame flow
+                // for a moment. Defocusing the preview across that window
+                // turns the two hard cuts (freeze-in, unfreeze) into a single
+                // defocus/refocus transition. With Reduce Motion on, only the
+                // dim changes.
+                .blur(radius: cameraService.isSwitchingCaptureMode && !reduceMotion ? 20 : 0)
+                .opacity(cameraService.isSwitchingCaptureMode ? 0.5 : 1)
+                .animation(.easeInOut(duration: 0.2), value: cameraService.isSwitchingCaptureMode)
+                .padding(.top)
 
             // Interruption overlay
             if cameraService.isSessionInterrupted {
@@ -136,14 +172,13 @@ public struct CameraCaptureView: View {
                 bottomControls
             }
             .padding(.horizontal)
-            .padding(.vertical, 20)
         }
         .background(Color.black.ignoresSafeArea(.all))
         .onAppear {
             Task { await initializeCamera() }
         }
         .onDisappear {
-            cameraService.cleanupCamera()
+            Task { await cameraService.cleanupCamera() }
         }
     }
 
@@ -156,8 +191,8 @@ public struct CameraCaptureView: View {
             flashButton
         }
         .overlay {
-            if cameraService.movieFileOutput?.isRecording ?? false {
-                RecordingTimeView(time: cameraService.movieFileOutput?.recordedDuration.seconds ?? 0)
+            if cameraService.isRecording {
+                RecordingTimeView(time: cameraService.recordedDurationSeconds)
             } else if cameraService.allowedCaptureModes.count > 1 {
                 modeSelector
                     .frame(maxWidth: 100)
@@ -171,9 +206,10 @@ public struct CameraCaptureView: View {
                 onCapture(.failure(CameraError.userCancelled))
             },
             label: {
-                Image(systemName: "xmark")
+                Label("Close", systemImage: "xmark")
+                    .labelStyle(.iconOnly)
                     .foregroundColor(.white)
-                    .padding()
+                    .padding(5)
                     .grayBackgroundCircle()
             }
         )
@@ -184,10 +220,77 @@ public struct CameraCaptureView: View {
     private var bottomControls: some View {
         HStack {
             Spacer(minLength: 44)
+            if cameraService.configuration.showsLensSwitcher {
+                lensButton
+            }
             cameraSwitchButton
         }
         .overlay {
             captureButton
+        }
+        .padding(.bottom, 20)
+    }
+
+    // MARK: - Lens Button
+
+    /// Shown only when the active camera is a multi-lens (virtual) device —
+    /// dual and triple cameras — and the configuration enables the lens
+    /// switcher. Displays the current lens magnification (e.g. 1×); tapping
+    /// shuffles to the next available lens in ascending order (1× → 2× → 3×
+    /// → 0.5× → 1×).
+    @ViewBuilder
+    private var lensButton: some View {
+        if let label = currentLensLabel {
+            Button(action: {
+                Task {
+                    await cameraService.switchLens()
+                }
+            }) {
+                Text(label)
+                    .font(.system(size: lensLabelSize, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .grayBackgroundCircle()
+            }
+            .accessibilityLabel("Switch lens")
+            .modifier(LensInputLabels(label: label))
+            .disabled(!cameraService.isCameraAvailable || cameraService.isRecording)
+        }
+    }
+
+    /// The magnification label of the currently selected lens, or `nil` when
+    /// the active camera has fewer than two lenses.
+    private var currentLensLabel: String? {
+        guard cameraService.lensCount > 1,
+            cameraService.lensMagnifications.count == cameraService.lensCount,
+            cameraService.lensMagnifications.indices.contains(cameraService.selectedLensIndex)
+        else { return nil }
+
+        return lensLabel(for: cameraService.lensMagnifications[cameraService.selectedLensIndex])
+    }
+
+    /// Formats a lens magnification for display: whole numbers render without
+    /// decimals (1×, 3×), fractional ones keep a decimal (0.5×).
+    private func lensLabel(for factor: CGFloat) -> String {
+        let roundedToTenth = (factor * 10).rounded() / 10
+        let number =
+            roundedToTenth == roundedToTenth.rounded()
+            ? String(Int(roundedToTenth))
+            : String(format: "%.1f", roundedToTenth)
+        return number + "×"
+    }
+
+    /// Adds Voice Control input labels for the lens button (`accessibilityInputLabels`
+    /// requires iOS 15 / macOS 12).
+    private struct LensInputLabels: ViewModifier {
+        let label: String
+
+        func body(content: Content) -> some View {
+            if #available(iOS 15.0, macOS 12.0, *) {
+                content.accessibilityInputLabels(["Switch Lens", label])
+            } else {
+                content
+            }
         }
     }
 
@@ -195,25 +298,26 @@ public struct CameraCaptureView: View {
 
     private var modeSelector: some View {
         Picker("Capture Mode", selection: $cameraService.captureMode) {
-            ForEach(cameraService.allowedCaptureModes.map({ $0 }).sorted(by: { $0.rawValue < $1.rawValue })) { mode in
+            ForEach(cameraService.allowedCaptureModes.sorted(by: { $0.rawValue < $1.rawValue })) { mode in
                 Label(mode.rawValue, systemImage: mode.systemImage)
                     .labelStyle(.iconOnly)
                     .tag(mode)
             }
         }
         .pickerStyle(.segmented)
-        .disabled(cameraService.previewImage == nil)
+        .disabled(cameraService.previewImage == nil || cameraService.isRecording)
     }
 
     // MARK: - Flash Button
 
     private var flashButton: some View {
-        Button(action: cameraService.toggleFlashMode) {
-            Image(systemName: flashIcon)
-                .foregroundColor(flashIconColor)
-                .padding()
-                .grayBackgroundCircle()
+        Button("Flash", systemImage: flashIcon) {
+            Task { await cameraService.toggleFlashMode() }
         }
+        .labelStyle(.iconOnly)
+        .foregroundColor(flashIconColor)
+        .padding(5)
+        .grayBackgroundCircle()
         .disabled(!cameraService.isCameraAvailable)
     }
 
@@ -240,7 +344,7 @@ public struct CameraCaptureView: View {
         }
 
         // During video recording, show torch status
-        if cameraService.captureMode == .video && cameraService.movieFileOutput?.isRecording == true {
+        if cameraService.captureMode == .video && cameraService.isRecording {
             if cameraService.isTorchAvailable {
                 switch cameraService.flashMode {
                     case .on:
@@ -274,16 +378,17 @@ public struct CameraCaptureView: View {
 
     private var cameraSwitchButton: some View {
         Button(action: {
-            withAnimation {
-                cameraService.switchCamera()
+            Task {
+                await cameraService.switchCamera()
             }
         }) {
-            Image(systemName: "camera.rotate")
+            Label("Rotate Camera", systemImage: "camera.rotate")
+                .labelStyle(.iconOnly)
                 .foregroundColor(.white)
                 .padding()
                 .grayBackgroundCircle()
         }
-        .disabled(!cameraService.isCameraAvailable)
+        .disabled(!cameraService.isCameraAvailable || cameraService.isRecording)
     }
 
     // MARK: - Capture Button
@@ -303,7 +408,7 @@ public struct CameraCaptureView: View {
                     .padding(4)
                     .grayBackgroundCircle()
 
-                if isRecording {
+                if cameraService.isRecording {
                     Circle()
                         .fill(.red)
                         .frame(width: 50, height: 50)
@@ -337,7 +442,7 @@ public struct CameraCaptureView: View {
 
     private func capturePhoto() {
         Task {
-            let result = await cameraService.capturePhotoWithCompletion()
+            let result = await cameraService.capturePhoto()
 
             await MainActor.run {
                 switch result {
@@ -351,7 +456,7 @@ public struct CameraCaptureView: View {
     }
 
     private func toggleVideoRecording() {
-        if isRecording {
+        if cameraService.isRecording {
             stopVideoRecording()
         } else {
             startVideoRecording()
@@ -365,9 +470,7 @@ public struct CameraCaptureView: View {
             await MainActor.run {
                 switch result {
                     case .success:
-                        withAnimation {
-                            isRecording = true
-                        }
+                        break
                     case .failure(let error):
                         onCapture(.failure(error))
                 }
@@ -380,9 +483,6 @@ public struct CameraCaptureView: View {
             let result = await cameraService.stopVideoRecording()
 
             await MainActor.run {
-                withAnimation {
-                    isRecording = false
-                }
                 switch result {
                     case .success(let url):
                         onCapture(.success(url))
