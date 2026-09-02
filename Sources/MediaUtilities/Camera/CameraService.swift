@@ -144,22 +144,31 @@ public final class CameraService: ObservableObject {
     /// When switching to video mode, torch is set to off by default.
     @Published public var captureMode: CaptureMode {
         didSet {
-            // Push the new mode into the engine for session-preset decisions.
+            // No-op sets (same mode) must not trigger an engine round-trip.
             let mode = captureMode
-            if oldValue != mode {
-                isSwitchingCaptureMode = true
-            }
-            Task { [engine, weak self] in
+            guard oldValue != mode else { return }
+
+            isSwitchingCaptureMode = true
+
+            // Latest-wins: cancel the previous transition so only the newest
+            // mode's engine run completes (the engine independently supersedes
+            // overlapping runs) and only the non-superseded task clears the
+            // published flag.
+            captureModeTransitionTask?.cancel()
+            captureModeTransitionTask = Task { [engine, weak self] in
                 await engine.setCaptureModeForWiring(mode)
-                if oldValue != mode {
-                    await engine.applySessionPresetForMode(mode)
-                    await MainActor.run { [weak self] in
-                        self?.isSwitchingCaptureMode = false
-                    }
+                await engine.applySessionPresetForMode(mode)
+                guard !Task.isCancelled else { return }
+                await MainActor.run { [weak self] in
+                    self?.isSwitchingCaptureMode = false
                 }
             }
         }
     }
+
+    /// The in-flight capture-mode transition task (see `captureMode.didSet`).
+    /// Cancelled and cleared in `cleanupCamera()`.
+    var captureModeTransitionTask: Task<Void, Never>?
 
     /// Indicates whether the camera session is currently interrupted
     /// (e.g., by a phone call or another app using the camera).
@@ -249,21 +258,26 @@ public final class CameraService: ObservableObject {
     /// sensor-oriented (not rotated or mirrored); the internal preview loop
     /// applies rotation and front-camera mirroring when building
     /// `previewImage`. The stream buffers only the newest frame, and is
-    /// recreated on `cleanupCamera()`.
-    public var previewStream: AsyncStream<CIImage>!
+    /// recreated on `cleanupCamera()`. Read-only for consumers — assigning it
+    /// externally would desync the internal preview loop.
+    public internal(set) var previewStream: AsyncStream<CIImage>!
 
     /// An async stream that delivers captured photos as they become available.
-    public private(set) var photoStream: AsyncStream<AVCapturePhoto>!
+    /// Recreated on `cleanupCamera()` so subscriptions survive camera
+    /// teardown/reopen cycles.
+    public internal(set) var photoStream: AsyncStream<AVCapturePhoto>!
 
     /// An async stream that delivers URLs of completed video recordings.
-    public private(set) var movieFileStream: AsyncStream<URL>!
+    /// Recreated on `cleanupCamera()` so subscriptions survive camera
+    /// teardown/reopen cycles.
+    public internal(set) var movieFileStream: AsyncStream<URL>!
 
     // MARK: - Preview Handling
 
     var previewLoop: Task<Void, Never>?
 
     /// Observes device-orientation changes and re-derives the preview
-    /// rotation (see `syncPreviewRotationFromDevice()`). Started by
+    /// rotation (see `syncRotationFromDevice()`). Started by
     /// `initializeCamera()` and cancelled in `cleanupCamera()`.
     var orientationObservationTask: Task<Void, Never>?
 
@@ -298,18 +312,13 @@ public final class CameraService: ObservableObject {
         let movieStream = AsyncStream<URL> { movieContinuation = $0 }
         self.movieFileStream = movieStream
 
-        // Build a placeholder state handler; we wire the real one after `self`
-        // is fully initialized.
-        let placeholderStateHandler = CameraEngineStateHandler(
-            didInterrupt: {},
-            didEndInterruption: {},
-            didFail: { _ in }
-        )
-
+        // The engine starts with no state handler (`nil` is a no-op, exactly
+        // like the placeholder object this used to build); the real one is
+        // installed in the Task below once `self` is fully initialized.
         self.engine = CameraEngine(
             configuration: configuration,
             captureMode: initialMode,
-            stateHandler: placeholderStateHandler,
+            stateHandler: nil,
             previewStreamContinuation: previewContinuation,
             photoStreamContinuation: photoContinuation,
             movieStreamContinuation: movieContinuation
@@ -375,7 +384,7 @@ public final class CameraService: ObservableObject {
                 // mirrored (see `updateVideoOutputConnection`), so rotation and
                 // front-camera mirroring are applied here on the raw buffer.
                 // The angle is the preview rotation derived from the device
-                // orientation (`syncPreviewRotationFromDevice`): it tracks how
+                // orientation (`syncRotationFromDevice`): it tracks how
                 // the user is currently holding the device, so the live preview
                 // stays upright and screen-filling in every orientation.
                 // Photos and recordings use the separate coordinator *capture*
@@ -401,17 +410,24 @@ public final class CameraService: ObservableObject {
 
     // MARK: - Preview Rotation
 
-    /// Maps the device orientation to the preview rotation angle. The raw
-    /// sensor buffer's intrinsic top is the phone's right edge in portrait, so
-    /// portrait needs a 90° clockwise correction, and every 90° of device
-    /// rotation offsets the angle by the same amount: portrait 90°,
-    /// landscapeLeft (top edge left) 0°, landscapeRight 180°, upside-down 270°.
-    /// The front camera's correction is offset by -90° (verified on device).
-    /// Consumed by the preview loop via `engine.previewRotationAngle`. The
-    /// rotation coordinator's preview angle cannot be used here - it is
-    /// computed against the preview layer's geometry, and this package renders
-    /// its preview without a real layer.
-    func syncPreviewRotationFromDevice() {
+    /// Maps the device orientation to the preview and capture rotation angles.
+    ///
+    /// Maps the device orientation to the preview rotation angle.
+    ///
+    /// This table owns the *preview* rotation on iOS (single writer); the
+    /// *capture* rotation is owned by the engine's rotation coordinator
+    /// (AVCam's architecture — see `CameraEngine.installRotationCoordinator`).
+    /// The raw sensor buffer's intrinsic top is the phone's right edge in
+    /// portrait, so portrait needs a 90° clockwise correction, and every 90°
+    /// of device rotation offsets the angle by the same amount: portrait 90°,
+    /// landscapeLeft (top edge left) 0°, landscapeRight 180°, upside-down
+    /// 270°. The front camera's sensor is mounted differently, offsetting its
+    /// correction by -90° (verified on hardware). The preview loop
+    /// additionally mirrors the front camera for the natural selfie view.
+    ///
+    /// Values are normalized to 0..<360 so the `uprightPreview` orientation
+    /// mapping always sees canonical angles.
+    func syncRotationFromDevice() {
         #if os(iOS)
         let baseAngle: CGFloat
         switch UIDevice.current.orientation {
@@ -421,9 +437,8 @@ public final class CameraService: ObservableObject {
             case .landscapeRight: baseAngle = 180
             default: return  // faceUp/faceDown/unknown: keep the last angle
         }
-        let usingFront = engine.isUsingFrontCaptureDeviceNow()
-        engine.previewRotationAngle = usingFront
-            ? (baseAngle - 90).truncatingRemainder(dividingBy: 360)
+        engine.previewRotationAngle = engine.isUsingFrontCaptureDeviceNow()
+            ? (baseAngle - 90 + 360).truncatingRemainder(dividingBy: 360)
             : baseAngle
         #endif
     }
@@ -440,7 +455,7 @@ public final class CameraService: ObservableObject {
                     named: UIDevice.orientationDidChangeNotification
                 ) {
                     guard let self, !Task.isCancelled else { return }
-                    self.syncPreviewRotationFromDevice()
+                    self.syncRotationFromDevice()
                 }
             }
         }
@@ -456,7 +471,7 @@ extension CIImage {
     /// optionally mirrors it horizontally (front camera).
     ///
     /// `rotationAngle` is the clockwise correction for the current device
-    /// orientation (the preview rotation - see `syncPreviewRotationFromDevice`),
+    /// orientation (the preview rotation - see `syncRotationFromDevice`),
     /// or 90 by default on OS versions without device-orientation tracking.
     fileprivate func uprightPreview(rotationAngle: CGFloat, mirrored: Bool) -> CIImage {
         let orientation: CGImagePropertyOrientation

@@ -13,19 +13,18 @@ import Foundation
 /// Capture lifecycle and device-control operations for `CameraService`.
 ///
 /// This extension groups the service's capture operations: starting and
-/// stopping the capture session, switching cameras and lenses, capturing
-/// still photos, and recording video. Every operation forwards to the
-/// internal `CameraEngine` actor, which serializes all AVFoundation work;
-/// results are delivered through `async` returns and `Result` values.
+/// stopping the capture session, switching cameras and lenses, and the
+/// low-level video-recording controls. (Photo capture and the high-level
+/// recording intents with permission handling live in
+/// `CameraService+Intents.swift`.) Every operation forwards to the internal
+/// `CameraEngine` actor, which serializes all AVFoundation work; results are
+/// delivered through `async` returns and `Result` values.
 ///
 /// ## Usage
 ///
 /// ```swift
-/// // Start the session, then capture a photo
+/// // Start the session, then record a video clip
 /// guard await cameraService.start() else { return }
-/// let result = await cameraService.capturePhoto()
-///
-/// // Record a video clip
 /// if case .success = await cameraService.startVideoRecording() {
 ///     let video = await cameraService.stopVideoRecording()
 /// }
@@ -68,7 +67,7 @@ extension CameraService {
         // The two cameras' sensors are mounted 180° apart, so the preview
         // rotation changes with the active camera even though the device
         // orientation did not.
-        syncPreviewRotationFromDevice()
+        syncRotationFromDevice()
 
         // The active device (and therefore its lens state) may have changed.
         lensCount = engine.lensCountSnapshot()

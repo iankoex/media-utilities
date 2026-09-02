@@ -30,10 +30,11 @@ actor CameraEngine {
     // MARK: - Owned AVFoundation State
 
     let captureSession = AVCaptureSession()
-    var deviceInput: AVCaptureDeviceInput?
-    var audioInput: AVCaptureDeviceInput?
     var photoOutput: AVCapturePhotoOutput?
     var videoOutput: AVCaptureVideoDataOutput?
+
+    /// Retained *solely to keep the preview delegate alive* — capture outputs
+    /// hold sample-buffer delegates weakly, and this property is never read.
     var videoDataOutputDelegate: VideoDataOutputDelegate?
     var isCaptureSessionConfigured = false
 
@@ -54,9 +55,6 @@ actor CameraEngine {
     /// Holder for the movie file output, allowing `nonisolated` snapshot reads.
     let movieFileOutputHolder: MovieOutputHolder
 
-    /// Holder for the engine's intended capture mode, allowing `nonisolated` reads.
-    let captureModeHolder: CaptureModeHolder
-
     final class DeviceHolder: @unchecked Sendable {
         var device: AVCaptureDevice?
         init(_ device: AVCaptureDevice?) { self.device = device }
@@ -67,32 +65,27 @@ actor CameraEngine {
         init(_ output: AVCaptureMovieFileOutput? = nil) { self.output = output }
     }
 
-    final class CaptureModeHolder: @unchecked Sendable {
-        var mode: CaptureMode
-        init(_ mode: CaptureMode) { self.mode = mode }
-    }
+    // MARK: - Rotation
 
-    // MARK: - Rotation Coordinator
-
-    /// The rotation coordinator for the current capture device. Recreated
-    /// whenever the active device changes. The coordinator is KVO-observed to
-    /// apply the correct rotation to the photo and movie output connections
-    /// when the device orientation changes. Only available on iOS 17+ / macOS 14+.
+    /// The rotation coordinator for the active device — the authority for the
+    /// *capture* angle (mirroring Apple's AVCam sample: seeded at session
+    /// setup and at every camera change, then KVO-applied continuously to the
+    /// photo and movie output connections). Only the capture angle is
+    /// consumed; the coordinator's *preview* angle requires a real, laid-out
+    /// preview layer, and this package renders its preview manually
+    /// (CIImage → SwiftUI), so the preview rotation is derived from device
+    /// orientation instead (see `previewRotationAngle`). Recreated whenever
+    /// the active device changes.
     var rotationCoordinator: AnyObject?
 
-    /// A `AVCaptureVideoPreviewLayer` we create solely so the rotation
-    /// coordinator has a layer to compute against. We don't add this layer to
-    /// a view hierarchy, so its geometry is synthetic and only the
-    /// coordinator's *capture* angle is meaningful - which is the only one we
-    /// consume. Created once and reused across camera switches: a
-    /// freshly-created layer has no established session connection yet, and
-    /// computing the seed angle against it mis-seeds the back camera's angle
-    /// as 0° until the coordinator's KVO fires some moments later. Retained
-    /// on the engine for the lifetime of the session.
+    /// A `AVCaptureVideoPreviewLayer` created solely so the rotation
+    /// coordinator has a layer to compute against. Never added to a view
+    /// hierarchy. Created once and reused across camera switches: computing
+    /// against a brand-new layer (no established session connection yet)
+    /// mis-seeds the angle until the coordinator's KVO fires moments later.
     var coordinatorPreviewLayer: AVCaptureVideoPreviewLayer?
 
-    /// KVO observations attached to the rotation coordinator. Held strongly
-    /// so the observation lives as long as the engine.
+    /// KVO observations attached to the rotation coordinator.
     var rotationObservations: [NSKeyValueObservation] = []
 
     /// KVO observation of the active device's `activeFormat`. A format change
@@ -101,28 +94,31 @@ actor CameraEngine {
     /// lens at the moment the new format lands.
     var activeFormatObservation: NSKeyValueObservation?
 
-    /// The latest `videoRotationAngleForHorizonLevelCapture` reported by the
-    /// coordinator. Read by `dispatchPhotoCapture` and
-    /// `applyCaptureRotationToPhotoAndMovieOutputs` to apply the correct
-    /// rotation to photos and recordings. This is the angle that makes
-    /// *captured media* come out straight - it must not be used for the live
-    /// preview, which follows the user's grip via `previewRotationAngle`.
-    /// Defaults to 90 (portrait) on iOS and 0 on macOS, where camera frames
-    /// are natively upright (the coordinator reports 0 there too).
+    /// The rotation applied to photo and movie captures so they come out
+    /// upright — the angle that makes *captured media* come out straight; it
+    /// must not be used for the live preview, which follows the user's grip
+    /// via `previewRotationAngle`.
+    ///
+    /// Single writer by design: the rotation coordinator owns this value on
+    /// iOS (seeded at install, refined by KVO — see
+    /// `installRotationCoordinator(for:)`); macOS keeps the 0 default, where
+    /// camera frames are natively upright. The facade's device-orientation
+    /// sync deliberately does NOT write it: an earlier version had both
+    /// writers fighting over one variable, which produced incorrectly
+    /// rotated captures (the conflict, not the coordinator, was the bug).
     nonisolated(unsafe) var captureRotationAngle: CGFloat = CameraEngine.defaultCaptureRotationAngle
 
     /// The rotation that keeps the live preview upright relative to how the
     /// user is currently holding the device. Derived from `UIDeviceOrientation`
-    /// by the facade (`syncPreviewRotationFromDevice`) on iOS; on macOS it
+    /// by the facade (`syncRotationFromDevice`) on iOS; on macOS it
     /// stays at 0, since camera frames are natively upright and there is no
     /// held-device orientation to track. Written by the facade on the main
     /// actor, read per frame by the preview loop - word-sized writes with
     /// benign tearing, same rationale as `captureRotationAngle`.
     nonisolated(unsafe) var previewRotationAngle: CGFloat = CameraEngine.defaultPreviewRotationAngle
 
-    /// Default rotation corrections before the coordinator seeds the capture
-    /// angle and while no device-orientation sync has run: iOS portraits need
-    /// 90° clockwise; macOS camera frames need none.
+    /// Default rotation corrections before the first device-orientation sync:
+    /// iOS portraits need 90° clockwise; macOS camera frames need none.
     #if os(macOS)
     private static let defaultCaptureRotationAngle: CGFloat = 0
     private static let defaultPreviewRotationAngle: CGFloat = 0
@@ -131,28 +127,29 @@ actor CameraEngine {
     private static let defaultPreviewRotationAngle: CGFloat = 90
     #endif
 
-    /// Creates a new rotation coordinator for the given device and observes it.
-    /// On iOS 17+ / macOS 14+ this drives the rotation automatically and
-    /// follows device orientation. On older OS, no rotation is applied (the
-    /// camera outputs the sensor-native orientation).
+    /// Creates the rotation coordinator for the given device and installs the
+    /// capture-angle observation — AVCam's pattern: seed the capture angle
+    /// from the coordinator immediately, then keep the photo and movie output
+    /// connections continuously updated as the device orientation changes.
+    ///
+    /// Only the coordinator's *capture* angle is consumed. Its preview angle
+    /// is computed against the preview layer's geometry and needs a real,
+    /// laid-out layer; the live preview here is CIImage-rendered and derives
+    /// its rotation from device orientation instead (`previewRotationAngle`).
+    ///
+    /// iOS only: macOS camera frames are natively upright and there is no
+    /// held-device orientation, so the capture angle stays at its 0 default.
     func installRotationCoordinator(for device: AVCaptureDevice) {
-        guard #available(macOS 14.0, iOS 17.0, *) else { return }
+        #if os(iOS)
+        guard #available(iOS 17.0, *) else { return }
 
         // Drop previous observations before installing a new coordinator. The
         // preview layer is deliberately *not* dropped - it is created once and
-        // reused (see `coordinatorPreviewLayer`).
+        // reused (see `coordinatorPreviewLayer`); computing against a
+        // brand-new layer mis-seeds the angle until KVO fires moments later.
         rotationObservations.removeAll()
         rotationCoordinator = nil
 
-        // We don't render the preview via `AVCaptureVideoPreviewLayer` (we use a
-        // `CIImage`/`Image` SwiftUI path), but the rotation coordinator needs
-        // *a* layer to compute against - without one, the back camera's capture
-        // angle falls back to 0. The layer is created on first use and reused
-        // for every subsequent coordinator: computing against a brand-new
-        // layer (no established connection yet) mis-seeds the back camera's
-        // angle as 0° after a switch, which shows as a briefly rotated preview
-        // until the coordinator self-corrects via KVO. The layer is never
-        // added to a view hierarchy; only its established connection matters.
         let previewLayer: AVCaptureVideoPreviewLayer
         if let existing = coordinatorPreviewLayer {
             previewLayer = existing
@@ -164,28 +161,31 @@ actor CameraEngine {
 
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
 
-        // Seed the capture angle. The capture angle is the horizon-level angle
-        // for raw buffers - the value that makes photos and recordings come
-        // out straight. The preview angle is deliberately NOT taken from the
-        // coordinator (see `previewRotationAngle`); the facade derives it from
-        // the device orientation instead.
+        // Seed the capture angle immediately (AVCam does the same) and apply
+        // it to the now-wired output connections.
         captureRotationAngle = coordinator.videoRotationAngleForHorizonLevelCapture
+        applyCaptureRotationToPhotoAndMovieOutputs()
 
-        // Observe capture rotation. This keeps photos and recordings tracking
-        // device-orientation changes.
         let captureObservation = coordinator.observe(
             \.videoRotationAngleForHorizonLevelCapture,
             options: [.new]
         ) { [weak self] _, change in
             guard let self, let angle = change.newValue else { return }
-            self.captureRotationAngle = angle
+            Task { await self.captureRotationDidChange(angle) }
         }
         rotationObservations.append(captureObservation)
 
         rotationCoordinator = coordinator
+        #endif
+    }
 
-        // Apply the initial capture rotation to the photo and movie connections
-        // (they're already added by wireSession by this point).
+    /// KVO delivery for the coordinator's capture angle: becomes the new
+    /// `captureRotationAngle` and is applied straight to the output
+    /// connections, so a capture started at any moment carries the current
+    /// orientation.
+    func captureRotationDidChange(_ angle: CGFloat) {
+        guard angle != captureRotationAngle else { return }
+        captureRotationAngle = angle
         applyCaptureRotationToPhotoAndMovieOutputs()
     }
 
@@ -214,8 +214,8 @@ actor CameraEngine {
     /// mutually exclusive per AVFoundation), and a format change resets the
     /// device's zoom to its default - the 0.5× ultra-wide on multi-lens
     /// devices. Re-applies the retained lens at the moment the reset lands,
-    /// and bumps the generation counter so the preset-change settle wait (see
-    /// `applySessionPresetForMode`) knows the reset has been handled.
+    /// bumps the generation counter, and wakes any settle waiters (see
+    /// `waitForFormatChange(past:timeout:)`).
     func activeFormatDidChange(deviceID: ObjectIdentifier) {
         guard let device = currentDeviceHolder.device,
             ObjectIdentifier(device) == deviceID
@@ -223,8 +223,74 @@ actor CameraEngine {
 
         #if os(iOS)
         selectLens(at: selectedLensIndexHolder.value, ramping: false)
-        formatChangeGenerationHolder.value += 1
+        formatChangeGeneration += 1
         #endif
+        resumeFormatChangeWaiters(landed: true)
+    }
+
+    // MARK: - Format-Change Settling
+
+    /// Counts `activeFormat` changes on the active device (bumped by
+    /// `activeFormatDidChange`). The settle wait below compares against a
+    /// snapshot of this counter to detect that the format change - and its
+    /// zoom reset - has landed.
+    private var formatChangeGeneration = 0
+
+    /// A suspended `waitForFormatChange` call. Resumed exactly once - by the
+    /// format-change signal (`landed: true`) or its own deadline expiry
+    /// (`landed: false`) - so no continuation can leak or be resumed twice.
+    private struct FormatChangeWaiter {
+        let continuation: CheckedContinuation<Bool, Never>
+        let deadline: Date
+    }
+
+    /// Waiters for the asynchronous `activeFormat` change that follows a
+    /// preset commit or input swap. Both this registry and the generation
+    /// counter live on the actor, so check-then-suspend is atomic against
+    /// `activeFormatDidChange` (which also runs on the actor).
+    private var formatChangeWaiters: [FormatChangeWaiter] = []
+
+    /// Suspends until the format-change generation advances past `generation`
+    /// (the change landed) or `timeout` elapses. Returns whether the change
+    /// was observed. Event-driven replacement for the previous 20 ms poll
+    /// loop: the waiter wakes the instant `activeFormatDidChange` fires
+    /// instead of up to one poll interval later.
+    private func waitForFormatChange(past generation: Int, timeout: TimeInterval) async -> Bool {
+        // Fast path: the change already landed (or never will).
+        guard formatChangeGeneration == generation else { return true }
+
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            formatChangeWaiters.append(
+                FormatChangeWaiter(
+                    continuation: continuation,
+                    deadline: Date().addingTimeInterval(timeout)
+                )
+            )
+            // Deadline watchdog. Resumes only waiters whose own deadline has
+            // passed, so a waiter that was already woken by the signal (and
+            // removed) is unaffected.
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                await self?.expireOverdueFormatChangeWaiters()
+            }
+        }
+    }
+
+    /// Wakes every waiter with `landed` and clears the registry.
+    private func resumeFormatChangeWaiters(landed: Bool) {
+        guard !formatChangeWaiters.isEmpty else { return }
+        let waiters = formatChangeWaiters
+        formatChangeWaiters.removeAll()
+        waiters.forEach { $0.continuation.resume(returning: landed) }
+    }
+
+    /// Wakes the waiters whose deadline elapsed without a format change.
+    private func expireOverdueFormatChangeWaiters() {
+        let now = Date()
+        let overdue = formatChangeWaiters.filter { $0.deadline <= now }
+        guard !overdue.isEmpty else { return }
+        formatChangeWaiters.removeAll { $0.deadline <= now }
+        overdue.forEach { $0.continuation.resume(returning: false) }
     }
 
     /// Convenience accessor used inside the actor.
@@ -244,6 +310,10 @@ actor CameraEngine {
         configuration.allowedCaptureModes
     }
 
+    /// The engine's intended capture mode, set by the facade via
+    /// `setCaptureModeForWiring(_:)` and read for session-preset decisions.
+    var captureMode: CaptureMode
+
     // MARK: - Continuations and Streams
 
     var previewStreamContinuation: AsyncStream<CIImage>.Continuation?
@@ -252,23 +322,12 @@ actor CameraEngine {
 
     // MARK: - State Forwarding
 
-    /// Holder for the state-update handler. Wrapped in a reference type so it
-    /// can be set from outside the actor (the facade installs the real handler
-    /// after `init` finishes; the engine reads it when state changes occur).
-    let stateHandlerHolder: StateHandlerHolder
-
-    final class StateHandlerHolder: @unchecked Sendable {
-        var handler: CameraEngineStateHandler?
-        init(_ handler: CameraEngineStateHandler? = nil) { self.handler = handler }
-    }
+    /// State-update forwarding, installed by the facade (after its `init`
+    /// completes) and read when engine state changes occur.
+    var stateHandler: CameraEngineStateHandler?
 
     func replaceStateHandler(_ handler: CameraEngineStateHandler) {
-        stateHandlerHolder.handler = handler
-    }
-
-    /// Convenience accessor used inside the actor.
-    var stateHandler: CameraEngineStateHandler? {
-        stateHandlerHolder.handler
+        stateHandler = handler
     }
 
     // MARK: - Executor
@@ -298,41 +357,21 @@ actor CameraEngine {
         self.selectedLensIndexHolder = IntHolder(0)
         #endif
         self.movieFileOutputHolder = MovieOutputHolder()
-        self.captureModeHolder = CaptureModeHolder(captureMode)
-        self.stateHandlerHolder = StateHandlerHolder(stateHandler)
-
-        // Initial preset - refined during wireSession based on capture mode.
-        // The triple camera is included so multi-lens devices get the richest
-        // back camera; at zoom factor 1.0 its primary lens matches the
-        // standalone wide-angle camera.
-        let initialDeviceTypes: [AVCaptureDevice.DeviceType] = {
-            #if os(iOS)
-            return [
-                .builtInTripleCamera,
-                .builtInTrueDepthCamera,
-                .builtInDualCamera,
-                .builtInDualWideCamera,
-                .builtInWideAngleCamera,
-            ]
-            #elseif os(macOS)
-            if #available(macOS 14.0, *) {
-                return [.external, .builtInWideAngleCamera]
-            }
-            return [.builtInWideAngleCamera]
-            #endif
-        }()
+        self.stateHandler = stateHandler
+        self.captureMode = captureMode
 
         // Prefer a device at the configured position; fall back to any device
         // (the discovery order, which surfaces the front camera first on some
-        // iPhones), then the system default.
+        // iPhones), then the system default. Device types come from
+        // `defaultDeviceTypes` - the same list device discovery uses.
         let initialDevice =
             AVCaptureDevice.DiscoverySession(
-                deviceTypes: initialDeviceTypes,
+                deviceTypes: Self.defaultDeviceTypes,
                 mediaType: .video,
                 position: configuration.initialCameraPosition
             ).devices.first
             ?? AVCaptureDevice.DiscoverySession(
-                deviceTypes: initialDeviceTypes,
+                deviceTypes: Self.defaultDeviceTypes,
                 mediaType: .video,
                 position: .unspecified
             ).devices.first
@@ -342,12 +381,23 @@ actor CameraEngine {
 
     /// Replaces the stream continuations. Called by the facade after
     /// `cleanupCamera()` finishes the old streams so the next
-    /// `initializeCamera()` works against fresh streams.
-    func replacePreviewContinuation(_ continuation: AsyncStream<CIImage>.Continuation) {
-        self.previewStreamContinuation = continuation
+    /// `initializeCamera()` works against fresh streams — for *all* three
+    /// streams, so consumers subscribing to `photoStream`/`movieFileStream`
+    /// keep receiving values across camera teardown/reopen cycles.
+    func replaceStreamContinuations(
+        preview: AsyncStream<CIImage>.Continuation,
+        photo: AsyncStream<AVCapturePhoto>.Continuation,
+        movie: AsyncStream<URL>.Continuation
+    ) {
+        self.previewStreamContinuation = preview
+        self.photoStreamContinuation = photo
+        self.movieStreamContinuation = movie
     }
 
     deinit {
+        // The notification streams never finish on their own; without this
+        // the observer tasks linger until the next notification fires.
+        notificationObservationTasks.forEach { $0.cancel() }
         previewStreamContinuation?.finish()
         photoStreamContinuation?.finish()
         movieStreamContinuation?.finish()
@@ -388,21 +438,24 @@ actor CameraEngine {
         notificationObservationTasks.forEach { $0.cancel() }
         notificationObservationTasks.removeAll()
         captureDevicesHolder.devices = []
+        cachedDeviceInputs.removeAll()
+
+        // Wake any suspended settle waiters (a mode switch cannot complete
+        // after teardown; resuming with `landed: false` lets them bail).
+        resumeFormatChangeWaiters(landed: false)
 
         // Finish and recreate streams so the facade can re-initialize later.
         previewStreamContinuation?.finish()
         photoStreamContinuation?.finish()
         movieStreamContinuation?.finish()
 
-        deviceInput = nil
-        audioInput = nil
         photoOutput = nil
         movieFileOutput = nil
         videoOutput = nil
         videoDataOutputDelegate = nil
         isCaptureSessionConfigured = false
-        coordinatorPreviewLayer = nil
         rotationCoordinator = nil
+        coordinatorPreviewLayer = nil
         rotationObservations.removeAll()
         activeFormatObservation?.invalidate()
         activeFormatObservation = nil
@@ -445,7 +498,6 @@ actor CameraEngine {
         // devices are attached first, the photo format is negotiated only
         // after the preset change settles and the first preview frames arrive
         // at the wrong aspect before snapping to 4:3.
-        let captureMode = awaitCaptureMode()
         captureSession.sessionPreset = (captureMode == .photo) ? .photo : .high
 
         let movieFileOutput = AVCaptureMovieFileOutput()
@@ -484,16 +536,13 @@ actor CameraEngine {
         captureSession.addOutput(videoOutput)
         captureSession.addOutput(movieFileOutput)
 
-        self.deviceInput = deviceInput
         self.photoOutput = photoOutput
         self.videoOutput = videoOutput
         self.movieFileOutput = movieFileOutput
         self.videoDataOutputDelegate = videoDataDelegate
 
-        // Install the rotation coordinator for the active device. It KVO-observes
-        // the device orientation and updates `captureRotationAngle` so photo and
-        // movie outputs (and the preview loop) always work with the right-way-up
-        // angle - including the front camera, which is physically inverted.
+        // Rotation: the coordinator (installed now that the outputs are
+        // wired) seeds and continuously maintains the capture angle.
         installRotationCoordinator(for: device)
         installActiveFormatObserver(for: device)
 
@@ -578,6 +627,13 @@ actor CameraEngine {
         guard isCaptureSessionConfigured else { return }
         guard movieFileOutput?.isRecording != true else { return }
 
+        // Resolve (or reuse) the new input *before* entering the
+        // configuration window — input allocation is pure setup work, and
+        // doing it inside begin/commit kept the preview frozen longer than
+        /// necessary. Cached after first use, so subsequent switches to this
+        /// camera skip the allocation entirely.
+        let newInput = deviceInputFor(device: captureDevice)
+
         captureSession.beginConfiguration()
 
         for input in captureSession.inputs {
@@ -586,9 +642,13 @@ actor CameraEngine {
             }
         }
 
-        if let deviceInput = deviceInputFor(device: captureDevice) {
-            if !captureSession.inputs.contains(deviceInput), captureSession.canAddInput(deviceInput) {
-                captureSession.addInput(deviceInput)
+        if let newInput {
+            if captureSession.canAddInput(newInput) {
+                captureSession.addInput(newInput)
+            } else {
+                // A cached input the session rejects is stale (e.g. the
+                // device reconnected); drop it so the next switch re-creates.
+                cachedDeviceInputs[ObjectIdentifier(captureDevice)] = nil
             }
         }
 
@@ -637,11 +697,24 @@ actor CameraEngine {
         previewPausedHolder.value = true
         defer { previewPausedHolder.value = previouslyPaused }
 
+        let previousDevice = currentDevice
         currentDevice = next
         updateSessionForCaptureDevice(next)
 
-        // Install a fresh rotation coordinator for the new device and apply its
-        // initial capture rotation to the photo and movie output connections.
+        // If the new input could not be wired, revert: `currentDevice`
+        // otherwise describes a device that isn't attached, and snapshots /
+        // lens state would report the wrong camera until the next switch.
+        if !captureSession.inputs.contains(where: { input in
+            guard let deviceInput = input as? AVCaptureDeviceInput else { return false }
+            return deviceInput.device == next
+        }) {
+            currentDevice = previousDevice
+            updateSessionForCaptureDevice(previousDevice ?? next)
+            return previousDevice
+        }
+
+        // Fresh coordinator for the new device (seeds its capture angle), and
+        // the format observer for the lens-restore on format changes.
         installRotationCoordinator(for: next)
         installActiveFormatObserver(for: next)
 
@@ -668,12 +741,20 @@ actor CameraEngine {
         guard isCaptureSessionConfigured else { return }
         guard movieFileOutput?.isRecording != true else { return }
 
+        // Latest-wins coalescing: a newer mode-switch request supersedes this
+        // one; at every await-resume point below, a superseded run bails out
+        // (its `defer` restores the preview-pause state) and only the newest
+        // run completes the transition. Rapid mode toggles can therefore
+        // never interleave their pause/restore pairs or their settle waits.
+        modeTransitionGeneration += 1
+        let transitionID = modeTransitionGeneration
+
         let previouslyPaused = previewPausedHolder.value
         previewPausedHolder.value = true
         defer { previewPausedHolder.value = previouslyPaused }
 
         #if os(iOS)
-        let generationBeforeCommit = formatChangeGenerationHolder.value
+        let generationBeforeCommit = formatChangeGeneration
         #endif
 
         captureSession.beginConfiguration()
@@ -681,55 +762,93 @@ actor CameraEngine {
         captureSession.commitConfiguration()
 
         // The preset change reforms the output connections; re-pin the data
-        // output's rotation, as camera switching does.
+        // output's rotation (the preview path) and re-apply the capture
+        // rotation to the photo and movie connections — the reformed
+        // connections come up with the system default angle, and the rotation
+        // coordinator's KVO will not re-fire (the device orientation did not
+        // change), so without this a capture right after a mode switch can
+        // carry a wrong orientation.
         updateVideoOutputConnection()
+        applyCaptureRotationToPhotoAndMovieOutputs()
+
+        guard transitionID == modeTransitionGeneration else { return }
 
         #if os(iOS)
         selectLens(at: selectedLensIndexHolder.value, ramping: false)
 
         // Wait (frames still dropped) for the format change to land and be
-        // countered by the activeFormat observer. Falls through on timeout
-        // when the preset change did not select a new format (no reset).
-        let settleDeadline = Date().addingTimeInterval(Self.formatSettleTimeout)
-        while Date() < settleDeadline, formatChangeGenerationHolder.value == generationBeforeCommit {
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
+        // countered by the activeFormat observer. Event-driven: the waiter
+        // wakes the moment the format changes. Falls through on timeout when
+        // the preset change did not select a new format (no reset).
+        let formatLanded = await waitForFormatChange(
+            past: generationBeforeCommit,
+            timeout: Self.formatSettleTimeout
+        )
+        guard transitionID == modeTransitionGeneration else { return }
 
         selectLens(at: selectedLensIndexHolder.value, ramping: false)
 
         // A format change means the lens handoff re-ran while frozen; hold a
-        // moment longer so the constituent blend finishes before frames resume.
-        if formatChangeGenerationHolder.value != generationBeforeCommit {
-            try? await Task.sleep(nanoseconds: 100_000_000)
+        // brief moment so the virtual device's constituent blend finishes
+        // before frames resume.
+        if formatLanded {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            guard transitionID == modeTransitionGeneration else { return }
         }
         #endif
     }
+
+    /// Latest-wins generation for `applySessionPresetForMode` runs; see the
+    /// coalescing note there.
+    private var modeTransitionGeneration = 0
 
     /// How long the mode-switch transition waits for a format change to land
     /// before resuming the preview.
     private static let formatSettleTimeout: TimeInterval = 0.3
 
+    /// Cached capture inputs, keyed by device identity. Camera switches
+    /// resolve inputs through here so the allocation happens at most once
+    /// per device — and, where possible, outside the frozen
+    /// begin/commit window (see `updateSessionForCaptureDevice`). Entries
+    /// are dropped when the session rejects them or when their device
+    /// disconnects.
+    private var cachedDeviceInputs: [ObjectIdentifier: AVCaptureDeviceInput] = [:]
+
     private func deviceInputFor(device: AVCaptureDevice?) -> AVCaptureDeviceInput? {
         guard let validDevice = device else { return nil }
-        return try? AVCaptureDeviceInput(device: validDevice)
+        let key = ObjectIdentifier(validDevice)
+        if let cached = cachedDeviceInputs[key] {
+            return cached
+        }
+        guard let input = try? AVCaptureDeviceInput(device: validDevice) else { return nil }
+        cachedDeviceInputs[key] = input
+        return input
     }
 
     /// Adds the microphone input to the capture session if missing.
     private func ensureAudioInputAdded() {
         guard allowedCaptureModes.contains(.video) else { return }
         guard configuration.capturesAudio else { return }
+
+        // Scan the session's existing inputs first: `AVCaptureDeviceInput`
+        // has identity (not value) equality, and `canAddInput` rejecting an
+        // already-attached device is the only thing the previous
+        // fresh-allocation approach relied on.
+        let hasAudioInput = captureSession.inputs.contains { input in
+            guard let deviceInput = input as? AVCaptureDeviceInput else { return false }
+            return deviceInput.device.hasMediaType(.audio)
+        }
+        guard !hasAudioInput else { return }
+
         guard let audioDevice = audioDevice() else { return }
         guard let audioInput = try? AVCaptureDeviceInput(device: audioDevice) else { return }
-        guard !captureSession.inputs.contains(audioInput), captureSession.canAddInput(audioInput) else {
-            return
-        }
+        guard captureSession.canAddInput(audioInput) else { return }
 
         captureSession.addInput(audioInput)
-        self.audioInput = audioInput
         enableAudioConnectionOnMovieOutput()
     }
 
-    func enableAudioConnectionOnMovieOutput() {
+    private func enableAudioConnectionOnMovieOutput() {
         guard let movieFileOutput,
             let audioConnection = movieFileOutput.connection(with: .audio)
         else { return }
@@ -800,9 +919,13 @@ actor CameraEngine {
 
             if let photoOutputVideoConnection = photoOutput.connection(with: .video) {
                 if #available(iOS 17.0, macOS 14.0, *) {
-                    // Driven by the rotation coordinator - front camera gets 270°
-                    // automatically, so the still comes out right-side up.
-                    photoOutputVideoConnection.videoRotationAngle = captureRotationAngle
+                    // Device-orientation-derived capture rotation (see
+                    // `captureRotationAngle`); applied per shot so stills come
+                    // out right-side up in every orientation. Skipped when the
+                    // consumer opted out of auto-oriented captures.
+                    if configuration.autoOrientsCaptures {
+                        photoOutputVideoConnection.videoRotationAngle = captureRotationAngle
+                    }
                 }
             }
         }
@@ -822,9 +945,9 @@ actor CameraEngine {
         let fileName = UUID().uuidString
         let filePath = directoryPath.appendingPathComponent(fileName).appendingPathExtension("mp4")
 
-        // Ensure the movie output's video connection has the rotation from the
-        // rotation coordinator (correct for back/front camera and for the
-        // current device orientation).
+        // Ensure the movie output's video connection carries the current
+        // capture rotation (correct for back/front camera and the current
+        // device orientation).
         applyCaptureRotationToPhotoAndMovieOutputs()
 
         enableAudioConnectionOnMovieOutput()
@@ -854,6 +977,10 @@ actor CameraEngine {
         // A recording can finish on its own (e.g. fail on disk-full) before
         // stop is requested; the delegate has already reported it.
         guard !recordingDidFinish else { return .failure(.recordingFailed) }
+        // A stop is already finalizing this recording (double-tap): fail fast
+        // rather than overwriting the pending continuation, which would leave
+        // the first caller awaiting forever.
+        guard pendingRecordingContinuation == nil else { return .failure(.recordingFailed) }
 
         return await withCheckedContinuation { (continuation: CheckedContinuation<Result<URL, CameraError>, Never>) in
             pendingRecordingContinuation = continuation
@@ -927,7 +1054,16 @@ actor CameraEngine {
         pendingRecordingContinuation = nil
 
         if error != nil {
+            try? FileManager.default.removeItem(at: url)
             pending?.resume(returning: .failure(.recordingFailed))
+            // A recording that ended on its own with no stop requested has no
+            // caller to report to; surface it so a custom UI learns the
+            // recording died instead of waiting on a stop that never comes.
+            if pending == nil {
+                await MainActor.run { [stateHandler] in
+                    stateHandler?.didFail(.recordingFailed)
+                }
+            }
             return
         }
 
@@ -939,6 +1075,11 @@ actor CameraEngine {
                 // user re-records rather than posting a silent video.
                 try? FileManager.default.removeItem(at: url)
                 pending?.resume(returning: .failure(.recordingFailed))
+                if pending == nil {
+                    await MainActor.run { [stateHandler] in
+                        stateHandler?.didFail(.recordingFailed)
+                    }
+                }
                 return
             }
         }
@@ -961,10 +1102,12 @@ actor CameraEngine {
             let probeURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("audio-flush-probe-\(UUID().uuidString).mp4")
             do {
-                // Force a real read of the bytes: the in-process cache will
-                // happily serve the stale video-only view of `url` itself.
-                let bytes = try Data(contentsOf: url)
-                try bytes.write(to: probeURL)
+                // Copy at a never-before-seen path via the kernel: the
+                // in-process cache will happily serve the stale video-only
+                // view of `url` itself, while a fresh copy is read from disk.
+                // (`copyItem` streams the bytes; reading the file into `Data`
+                // would allocate the whole recording in memory per probe.)
+                try FileManager.default.copyItem(at: url, to: probeURL)
 
                 let probeAsset = AVURLAsset(url: probeURL)
                 let audioTrackCount: Int
@@ -1008,7 +1151,6 @@ actor CameraEngine {
             captureSession.canAddInput(deviceInput)
         {
             captureSession.addInput(deviceInput)
-            self.deviceInput = deviceInput
         }
 
         ensureAudioInputAdded()
@@ -1018,6 +1160,14 @@ actor CameraEngine {
 
         // Re-pin after commit - see updateSessionForCaptureDevice.
         updateVideoOutputConnection()
+
+        #if os(iOS)
+        // An interruption (or the format reset that follows re-adding inputs)
+        // reverts the device zoom to its default - the 0.5× ultra-wide on
+        // multi-lens devices. Re-apply the retained lens so it doesn't
+        // silently drop and desync from the published `selectedLensIndex`.
+        selectLens(at: selectedLensIndexHolder.value, ramping: false)
+        #endif
 
         if !captureSession.isRunning {
             captureSession.startRunning()
@@ -1039,14 +1189,11 @@ actor CameraEngine {
         }
         captureSession.commitConfiguration()
 
-        deviceInput = nil
-        audioInput = nil
         photoOutput = nil
         movieFileOutput = nil
         videoOutput = nil
         videoDataOutputDelegate = nil
         isCaptureSessionConfigured = false
-        coordinatorPreviewLayer = nil
         rotationCoordinator = nil
         rotationObservations.removeAll()
         captureDevicesHolder.devices = []
@@ -1124,25 +1271,36 @@ actor CameraEngine {
         guard #available(macOS 12.0, iOS 15.0, *) else { return }
         guard let error = note.userInfo?[AVCaptureSessionErrorKey] as? AVError else { return }
         switch error.code {
-            #if os(iOS)
-                case .deviceNotConnected:
-                    // Re-query the hardware: the cache may still contain the
-                    // device that just disconnected.
-                    captureDevicesHolder.devices = []
-                    if let active = currentDevice,
-                        !availableCaptureDevices().contains(active),
-                        let fallback = availableCaptureDevices().first
-                    {
-                        currentDevice = fallback
-                    }
-                    restoreSessionInputs()
-                    await MainActor.run { [stateHandler] in
-                        stateHandler?.didFail(.deviceNotAvailable)
-                    }
+            // Handled on both platforms: a disconnected camera (unplugged
+            // webcam on macOS, detached lens camera on iOS) and a
+            // media-services reset both leave a dead session that must be
+            // recovered or surfaced. Previously these were iOS-only, so macOS
+            // runtime errors were silently dropped.
+            case .deviceNotConnected:
+                // Re-query the hardware: the cache may still contain the
+                // device that just disconnected. Drop its cached input too -
+                // a stale input for a reconnected device is rejected by
+                // `canAddInput` on the next switch.
+                cachedDeviceInputs = cachedDeviceInputs.filter { _, input in
+                    input.device.isConnected
+                }
+                captureDevicesHolder.devices = []
+                if let active = currentDevice,
+                    !availableCaptureDevices().contains(active),
+                    let fallback = availableCaptureDevices().first
+                {
+                    currentDevice = fallback
+                }
+                restoreSessionInputs()
+                await MainActor.run { [stateHandler] in
+                    stateHandler?.didFail(.deviceNotAvailable)
+                }
 
+            #if os(iOS)
                 case .mediaServicesWereReset:
-                    // If a recording is in flight, the recording delegate already
-                    // reports the failure. Skip the rebuild and surface the error.
+                    // iOS-only error code. If a recording is in flight, the
+                    // recording delegate already reports the failure. Skip the
+                    // rebuild and surface the error.
                     guard movieFileOutput?.isRecording != true else {
                         await MainActor.run { [stateHandler] in
                             stateHandler?.didFail(
@@ -1204,11 +1362,6 @@ actor CameraEngine {
         var value: Int
         init(_ value: Int) { self.value = value }
     }
-
-    /// Counts `activeFormat` changes on the active device. The mode-switch
-    /// preset transition (see `applySessionPresetForMode`) uses it to detect
-    /// that the format change - and its zoom reset - has landed.
-    let formatChangeGenerationHolder = IntHolder(0)
 
     /// The number of lenses available on the active camera. Non-virtual
     /// devices report a single lens.
@@ -1367,7 +1520,7 @@ actor CameraEngine {
     /// Applies the torch immediately when in video mode. No-op in photo mode
     /// or when the current device doesn't have a torch.
     func applyTorchImmediately(mode: AVCaptureDevice.FlashMode) {
-        guard captureModeHolder.mode == .video,
+        guard captureMode == .video,
             let device = currentDeviceHolder.device,
             device.isTorchAvailable
         else { return }
@@ -1388,16 +1541,21 @@ actor CameraEngine {
 
     // MARK: - Rotation
 
-    /// Returns the rotation angle to apply to recording-style connections (photo
-    /// and movie outputs) for the current capture device.
+    /// Applies the cached capture rotation to the photo and movie output
+    /// connections.
     ///
-    /// Reads `captureRotationAngle` from the rotation coordinator (set when
-    /// `installRotationCoordinator(for:)` runs and updated automatically when
-    /// device orientation changes) and applies it to the photo and movie
-    /// output connections. With this in place, the front camera no longer
-    /// produces rotated videos and the recording follows the device's gravity.
+    /// `captureRotationAngle` is owned by the rotation coordinator (the
+    /// single writer — see the property's doc comment) and is applied at
+    /// coordinator install, on every KVO angle change, and at capture time /
+    /// session-graph changes, so the connections never carry a stale angle
+    /// into a recording.
+    ///
+    /// Gated by `CaptureConfiguration.autoOrientsCaptures`: when disabled,
+    /// capture connections are left untouched and outputs are written
+    /// sensor-native (raw).
     func applyCaptureRotationToPhotoAndMovieOutputs() {
         guard #available(macOS 14.0, iOS 17.0, *) else { return }
+        guard configuration.autoOrientsCaptures else { return }
         let angle = captureRotationAngle
         if let connection = photoOutput?.connection(with: .video) {
             connection.videoRotationAngle = angle
@@ -1427,10 +1585,6 @@ actor CameraEngine {
         captureSession.isRunning
     }
 
-    nonisolated func currentDeviceSnapshot() -> AVCaptureDevice? {
-        currentDeviceHolder.device
-    }
-
     nonisolated func isRecordingSnapshot() -> Bool {
         movieFileOutputHolder.output?.isRecording ?? false
     }
@@ -1439,28 +1593,17 @@ actor CameraEngine {
         movieFileOutputHolder.output?.recordedDuration.seconds ?? 0
     }
 
-    /// Reports the engine's intended capture mode. The facade passes this
-    /// in via `awaitCaptureMode()` and the engine also stores it for
-    /// session-preset decisions. Backed by `captureModeHolder` so `nonisolated`
-    /// reads work.
-    var captureMode: CaptureMode {
-        get { captureModeHolder.mode }
-        set { captureModeHolder.mode = newValue }
-    }
-
+    /// Sets the engine's intended capture mode (see `captureMode`).
     func setCaptureModeForWiring(_ mode: CaptureMode) {
-        captureModeHolder.mode = mode
-    }
-
-    /// Returns the currently-set capture mode for the engine's session
-    /// wiring. Should be set by the facade before `start()` is called.
-    nonisolated func awaitCaptureMode() -> CaptureMode {
-        captureModeHolder.mode
+        captureMode = mode
     }
 
     nonisolated func isUsingFrontCaptureDeviceNow() -> Bool {
-        guard let device = currentDeviceHolder.device else { return false }
-        return frontCaptureDevices().contains(device)
+        // Read the active device directly — this runs per preview frame, and
+        // the previous membership check against a fresh `DiscoverySession`
+        // allocated one per call (the exact cost the device cache exists to
+        // avoid). The active device is authoritative for the camera in use.
+        currentDeviceHolder.device?.position == .front
     }
 
     nonisolated func isUsingBackCaptureDeviceNow() -> Bool {
@@ -1479,12 +1622,26 @@ actor CameraEngine {
     /// Cached result of device discovery. `DiscoverySession` is expensive,
     /// and the facade's availability checks run on every SwiftUI evaluation,
     /// so discovery results are cached and refreshed when the engine
-    /// (re)configures or cleans up. Concurrent first access may both compute
-    /// the list; the writes are idempotent and equivalent.
+    /// (re)configures or cleans up. Guarded by a lock: the cache is read and
+    /// written from both the main actor and the engine actor.
     let captureDevicesHolder = DeviceListHolder()
 
     final class DeviceListHolder: @unchecked Sendable {
-        var devices: [AVCaptureDevice] = []
+        private let lock = NSLock()
+        private var devicesValue: [AVCaptureDevice] = []
+
+        var devices: [AVCaptureDevice] {
+            get {
+                lock.lock()
+                defer { lock.unlock() }
+                return devicesValue
+            }
+            set {
+                lock.lock()
+                defer { lock.unlock() }
+                devicesValue = newValue
+            }
+        }
     }
 
     nonisolated func availableCaptureDevices() -> [AVCaptureDevice] {
@@ -1494,7 +1651,7 @@ actor CameraEngine {
         return captureDevicesHolder.devices
     }
 
-    private nonisolated var defaultDeviceTypes: [AVCaptureDevice.DeviceType] {
+    private nonisolated static var defaultDeviceTypes: [AVCaptureDevice.DeviceType] {
         #if os(iOS)
         return [
             .builtInTripleCamera,
@@ -1504,8 +1661,12 @@ actor CameraEngine {
             .builtInWideAngleCamera,
         ]
         #elseif os(macOS)
-        // See `initialDeviceTypes`: `.external` adds external webcams and
-        // Continuity Camera devices on macOS 14+.
+        // `.external` adds external webcams and Continuity Camera devices on
+        // macOS 14+ (`.builtInWideAngleCamera` alone still matches the
+        // built-in FaceTime camera - verified on macOS 26). On iOS the triple
+        // camera is included so multi-lens devices get the richest back
+        // camera; at zoom factor 1.0 its primary lens matches the standalone
+        // wide-angle camera.
         if #available(macOS 14.0, *) {
             return [.external, .builtInWideAngleCamera]
         }
@@ -1515,7 +1676,7 @@ actor CameraEngine {
 
     private nonisolated func allCaptureDevices() -> [AVCaptureDevice] {
         AVCaptureDevice.DiscoverySession(
-            deviceTypes: defaultDeviceTypes,
+            deviceTypes: Self.defaultDeviceTypes,
             mediaType: .video,
             position: .unspecified
         ).devices

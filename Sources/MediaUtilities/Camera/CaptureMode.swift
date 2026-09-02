@@ -53,12 +53,3 @@ public enum CaptureMode: String, CaseIterable, Identifiable, Sendable {
         self.rawValue
     }
 }
-
-// MARK: - Rotation Angle
-
-enum RotationAngle: CGFloat {
-    case portrait = 90
-    case portraitUpsideDown = 270
-    case landscapeRight = 180
-    case landscapeLeft = 0
-}

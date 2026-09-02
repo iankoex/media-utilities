@@ -199,7 +199,7 @@ extension CameraService {
         // preview angle needs a real, laid-out preview layer, which this
         // package does not render with), so derive it from the device
         // orientation: seed now, then track changes while the camera is up.
-        syncPreviewRotationFromDevice()
+        syncRotationFromDevice()
         startObservingDeviceOrientationChanges()
 
         // Purge capture files left behind by previous sessions (older than
@@ -235,6 +235,8 @@ extension CameraService {
 
         orientationObservationTask?.cancel()
         orientationObservationTask = nil
+        captureModeTransitionTask?.cancel()
+        captureModeTransitionTask = nil
         #if os(iOS)
         engine.previewRotationAngle = 90
         #endif
@@ -264,13 +266,25 @@ extension CameraService {
         previewLoop?.cancel()
         previewLoop = nil
 
-        // Recreate the preview stream for potential re-initialization
+        // Recreate all three streams for potential re-initialization and push
+        // the fresh continuations into the engine. Awaited inline (not via a
+        // detached Task) so an immediately following `initializeCamera()` can
+        // never wire the session against the old, finished continuations —
+        // and so photo/movie subscribers keep receiving values after a
+        // teardown/reopen cycle (previously only the preview stream was
+        // replaced, leaving `photoStream` and `movieFileStream` permanently
+        // dead).
         var previewContinuation: AsyncStream<CIImage>.Continuation!
         previewStream = AsyncStream<CIImage>(bufferingPolicy: .bufferingNewest(1)) { previewContinuation = $0 }
-        // Push the new continuation into the engine so future starts use it.
-        Task { [engine] in
-            await engine.replacePreviewContinuation(previewContinuation)
-        }
+        var photoContinuation: AsyncStream<AVCapturePhoto>.Continuation!
+        photoStream = AsyncStream<AVCapturePhoto> { photoContinuation = $0 }
+        var movieContinuation: AsyncStream<URL>.Continuation!
+        movieFileStream = AsyncStream<URL> { movieContinuation = $0 }
+        await engine.replaceStreamContinuations(
+            preview: previewContinuation,
+            photo: photoContinuation,
+            movie: movieContinuation
+        )
     }
 
     /// Returns comprehensive information about the current camera state.

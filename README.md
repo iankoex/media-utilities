@@ -152,14 +152,34 @@ class CameraManager {
 
 #### Camera Features
 
-- **Live Preview**: Real-time camera preview with pause/resume controls
+- **Live Preview**: Real-time camera preview that follows device orientation, with pause/resume controls
 - **Photo/Video Capture**: Switch between photo and video recording modes
 - **Allowed Capture Modes**: Configure which capture modes (photo/video) are available via `allowedCaptureModes` parameter
+- **Auto-Oriented Captures**: Photos and videos are written upright in the orientation the device was held in (landscape grip → upright landscape file); disable with `autoOrientsCaptures: false` for sensor-native output
+- **Optional Audio**: Configure video recordings with or without the microphone via `capturesAudio` (mic permission is only requested when audio is enabled)
 - **Flash Control**: Automatic flash mode cycling (off/auto/on)
 - **Camera Switching**: Toggle between front and back cameras
+- **Lens Selection**: Programmatic and UI lens switching on multi-lens devices (`selectLens(at:)`, `switchLens()`, `showsLensSwitcher`)
 - **Permission Handling**: Automatic camera access request and status checking
 - **Error Handling**: Comprehensive error reporting with localized messages
+- **Recording Safety**: Finished recordings are verified to contain their audio track before delivery; a recording that cannot be finalized fails visibly instead of producing a broken file
 - **Cross-Platform**: Works on both iOS and macOS with platform-specific optimizations
+
+#### Camera Configuration
+
+`CameraCaptureView` and `CameraService` accept a `CaptureConfiguration`:
+
+```swift
+let configuration = CaptureConfiguration(
+    allowedCaptureModes: [.photo, .video], // modes available in the interface
+    photoQuality: .balanced,               // .balanced (fast) or .quality (best)
+    photoDimensions: .standard,            // .standard, .maximum, or .custom(...)
+    initialCameraPosition: .back,          // camera active on first open
+    showsLensSwitcher: false,              // show the lens switcher button
+    capturesAudio: true,                   // microphone in video recordings
+    autoOrientsCaptures: true              // write captures upright per device orientation
+)
+```
 
 What this allows you to do is enable drag and drop to the view,edit the asset then retun the edited asset.
 The `isPresented` directly controls the PhotosPicker in iOS and finder window in macOS.

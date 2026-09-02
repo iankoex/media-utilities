@@ -21,7 +21,7 @@ final class MovieRecordingDelegate: NSObject, AVCaptureFileOutputRecordingDelega
 
     private weak var engine: CameraEngine?
 
-    init(engine: CameraEngine?) {
+    init(engine: CameraEngine) {
         self.engine = engine
     }
 

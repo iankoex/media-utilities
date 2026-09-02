@@ -32,6 +32,10 @@ final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
     /// it resumes the continuation. Nilled inside the continuation-resume path.
     private var retained: PhotoCaptureDelegate?
 
+    /// The URL written by `didFinishProcessingPhoto`, delivered when the
+    /// guaranteed-final callback arrives.
+    private var capturedURL: URL?
+
     init(
         continuation: CheckedContinuation<URL?, Never>,
         photoStreamContinuation: AsyncStream<AVCapturePhoto>.Continuation?
@@ -49,18 +53,7 @@ final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
         didFinishProcessingPhoto photo: AVCapturePhoto,
         error: Error?
     ) {
-        // Always release the self-retention once the continuation has been resumed.
-        defer { retained = nil }
-
-        if error != nil {
-            continuation.resume(returning: nil)
-            return
-        }
-
-        guard let imageData = photo.fileDataRepresentation() else {
-            continuation.resume(returning: nil)
-            return
-        }
+        guard error == nil, let imageData = photo.fileDataRepresentation() else { return }
 
         // HEVC captures are HEIC data - sniff the payload to pick the
         // extension instead of assuming JPEG. JPEG begins with the FF D8
@@ -73,9 +66,24 @@ final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
         do {
             try imageData.write(to: tempURL)
             photoStreamContinuation?.yield(photo)
-            continuation.resume(returning: tempURL)
+            capturedURL = tempURL
         } catch {
-            continuation.resume(returning: nil)
+            // Leave `capturedURL` nil; `didFinishCaptureFor` resumes with the
+            // failure.
         }
+    }
+
+    /// The guaranteed-final capture callback. `didFinishProcessingPhoto` is
+    /// *not* guaranteed — a capture that dies before photo processing (session
+    /// interruption, teardown) never delivers it — so the continuation is
+    /// resumed only here.
+    func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
+        error: Error?
+    ) {
+        guard retained != nil else { return }  // resume exactly once
+        defer { retained = nil }
+        continuation.resume(returning: error == nil ? capturedURL : nil)
     }
 }

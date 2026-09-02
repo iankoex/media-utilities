@@ -96,6 +96,17 @@ public struct CaptureConfiguration: Equatable, Sendable {
     /// mode. When `false`, recordings contain no audio track.
     public var capturesAudio: Bool
 
+    // MARK: Orientation
+
+    /// Whether photos and videos are written upright, matching the
+    /// orientation the device was held in — a landscape grip produces an
+    /// upright landscape file, a portrait grip an upright portrait file.
+    ///
+    /// When `false`, captures are written sensor-native (raw) and the
+    /// consumer handles orientation downstream. The live preview always
+    /// follows the device orientation regardless of this setting.
+    public var autoOrientsCaptures: Bool
+
     // MARK: - Initialization
 
     /// Creates a capture configuration.
@@ -112,13 +123,16 @@ public struct CaptureConfiguration: Equatable, Sendable {
     ///     button. Defaults to `false`.
     ///   - capturesAudio: Whether video mode includes the microphone.
     ///     Defaults to `true`.
+    ///   - autoOrientsCaptures: Whether captures are written upright in the
+    ///     orientation the device was held in. Defaults to `true`.
     public init(
         allowedCaptureModes: Set<CaptureMode> = [.photo, .video],
         photoQuality: PhotoQuality = .balanced,
         photoDimensions: PhotoDimensions = .standard,
         initialCameraPosition: AVCaptureDevice.Position = .back,
         showsLensSwitcher: Bool = false,
-        capturesAudio: Bool = true
+        capturesAudio: Bool = true,
+        autoOrientsCaptures: Bool = true
     ) {
         self.allowedCaptureModes = allowedCaptureModes
         self.photoQuality = photoQuality
@@ -126,6 +140,7 @@ public struct CaptureConfiguration: Equatable, Sendable {
         self.initialCameraPosition = initialCameraPosition
         self.showsLensSwitcher = showsLensSwitcher
         self.capturesAudio = capturesAudio
+        self.autoOrientsCaptures = autoOrientsCaptures
     }
 }
 

@@ -116,13 +116,14 @@ public struct CameraCaptureView: View {
             } message: {
                 Text("Please enable camera access in Settings to use this feature.")
             }
-            .onChange(of: cameraService.sessionError) { error in
-                if let error = error {
-                    cameraService.sessionError = nil
-                    onCapture(.failure(error))
-                }
-            }
                 #endif
+                // Runtime failures (camera disconnected, media-services reset)
+                .onChange(of: cameraService.sessionError) { error in
+                    if let error = error {
+                        cameraService.sessionError = nil
+                        onCapture(.failure(error))
+                    }
+                }
         } else {
             viewBody
         }
@@ -196,7 +197,10 @@ public struct CameraCaptureView: View {
         }
         .overlay {
             if cameraService.isRecording {
-                RecordingTimeView(time: cameraService.recordedDurationSeconds)
+                // Driven by its own clock, not by `previewImage`
+                // republication — a paused or stalled preview must never
+                // freeze the recording timer.
+                RecordingTimeView(timeProvider: { cameraService.recordedDurationSeconds })
             } else if cameraService.allowedCaptureModes.count > 1 {
                 modeSelector
                     .frame(maxWidth: 100)
@@ -248,7 +252,11 @@ public struct CameraCaptureView: View {
         .pickerStyle(.segmented)
         .labelStyle(.iconOnly)
         .labelsHidden()
-        .disabled(cameraService.previewImage == nil || cameraService.isRecording)
+        // A mode switch reconfigures the session and resets the lens; taps
+        // during the transition would race the automatic lens restore.
+        .disabled(
+            cameraService.previewImage == nil || cameraService.isRecording || cameraService.isSwitchingCaptureMode
+        )
     }
 
     // MARK: - Flash Button
@@ -339,7 +347,9 @@ public struct CameraCaptureView: View {
                     .grayBackgroundCircle()
             }
             .accessibilityLabel("Switch lens")
-            .disabled(!cameraService.isCameraAvailable || cameraService.isRecording)
+            .disabled(
+                !cameraService.isCameraAvailable || cameraService.isRecording || cameraService.isSwitchingCaptureMode
+            )
         }
     }
 
@@ -461,6 +471,7 @@ public struct CameraCaptureView: View {
                     case .success:
                         break
                     case .failure(let error):
+                        guard !cameraService.isRecording else { return }
                         onCapture(.failure(error))
                 }
             }
@@ -476,6 +487,7 @@ public struct CameraCaptureView: View {
                     case .success(let url):
                         onCapture(.success(url))
                     case .failure(let error):
+                        guard cameraService.isRecording else { return }
                         onCapture(.failure(error))
                 }
             }
