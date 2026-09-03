@@ -85,7 +85,7 @@ public struct CaptureConfiguration: Equatable, Sendable {
     /// cycles the active lens on multi-lens (virtual) devices (1× → 2× → 3× →
     /// 0.5× → 1×).
     ///
-    /// Defaults to `false`, keeping the interface to a single 1× lens.
+    /// Defaults to `true`, keeping the interface to a single 1× lens.
     /// Programmatic lens selection (`CameraService.selectLens(at:)` and
     /// `switchLens()`) remains available regardless of this setting.
     public var showsLensSwitcher: Bool
@@ -120,7 +120,7 @@ public struct CaptureConfiguration: Equatable, Sendable {
     ///   - initialCameraPosition: Camera active on first open.
     ///     Defaults to `.back`.
     ///   - showsLensSwitcher: Whether the interface shows the lens switcher
-    ///     button. Defaults to `false`.
+    ///     button. Defaults to `true`.
     ///   - capturesAudio: Whether video mode includes the microphone.
     ///     Defaults to `true`.
     ///   - autoOrientsCaptures: Whether captures are written upright in the
@@ -130,7 +130,7 @@ public struct CaptureConfiguration: Equatable, Sendable {
         photoQuality: PhotoQuality = .balanced,
         photoDimensions: PhotoDimensions = .standard,
         initialCameraPosition: AVCaptureDevice.Position = .back,
-        showsLensSwitcher: Bool = false,
+        showsLensSwitcher: Bool = true,
         capturesAudio: Bool = true,
         autoOrientsCaptures: Bool = true
     ) {

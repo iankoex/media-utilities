@@ -410,25 +410,18 @@ public final class CameraService: ObservableObject {
 
     // MARK: - Preview Rotation
 
-    /// Maps the device orientation to the preview and capture rotation angles.
-    ///
     /// Maps the device orientation to the preview rotation angle.
-    ///
-    /// This table owns the *preview* rotation on iOS (single writer); the
-    /// *capture* rotation is owned by the engine's rotation coordinator
-    /// (AVCam's architecture — see `CameraEngine.installRotationCoordinator`).
-    /// The raw sensor buffer's intrinsic top is the phone's right edge in
-    /// portrait, so portrait needs a 90° clockwise correction, and every 90°
-    /// of device rotation offsets the angle by the same amount: portrait 90°,
-    /// landscapeLeft (top edge left) 0°, landscapeRight 180°, upside-down
-    /// 270°. The front camera's sensor is mounted differently, offsetting its
-    /// correction by -90° (verified on hardware). The preview loop
-    /// additionally mirrors the front camera for the natural selfie view.
-    ///
-    /// Values are normalized to 0..<360 so the `uprightPreview` orientation
-    /// mapping always sees canonical angles.
     func syncRotationFromDevice() {
         #if os(iOS)
+        if CameraEngine.isRunningOnMac {
+            engine.previewRotationAngle = 90
+            return
+        }
+        if CameraEngine.isMacCatalyst {
+            engine.previewRotationAngle = 0
+            return
+        }
+
         let baseAngle: CGFloat
         switch UIDevice.current.orientation {
             case .portrait: baseAngle = 90
@@ -437,7 +430,8 @@ public final class CameraService: ObservableObject {
             case .landscapeRight: baseAngle = 180
             default: return  // faceUp/faceDown/unknown: keep the last angle
         }
-        engine.previewRotationAngle = engine.isUsingFrontCaptureDeviceNow()
+        engine.previewRotationAngle =
+            engine.isUsingFrontCaptureDeviceNow()
             ? (baseAngle - 90 + 360).truncatingRemainder(dividingBy: 360)
             : baseAngle
         #endif

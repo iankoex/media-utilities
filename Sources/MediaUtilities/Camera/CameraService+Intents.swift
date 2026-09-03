@@ -238,7 +238,7 @@ extension CameraService {
         captureModeTransitionTask?.cancel()
         captureModeTransitionTask = nil
         #if os(iOS)
-        engine.previewRotationAngle = 90
+        engine.previewRotationAngle = CameraEngine.isMacCatalyst ? 0 : 90
         #endif
 
         // Reset facade state

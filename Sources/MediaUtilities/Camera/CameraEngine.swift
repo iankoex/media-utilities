@@ -9,12 +9,9 @@
 // yet annotated `Sendable`; `@preconcurrency` scopes that mismatch to this
 // file until the Swift 6 migration pass restructures the notification tasks.
 @preconcurrency import AVFoundation
+import AudioToolbox
 import CoreImage
 import Foundation
-
-#if os(iOS)
-import AudioToolbox
-#endif
 
 /// The internal AVFoundation owner.
 ///
@@ -142,6 +139,11 @@ actor CameraEngine {
     func installRotationCoordinator(for device: AVCaptureDevice) {
         #if os(iOS)
         guard #available(iOS 17.0, *) else { return }
+
+        if CameraEngine.isRunningOnMac {
+            captureRotationAngle = -90
+            return
+        }
 
         // Drop previous observations before installing a new coordinator. The
         // preview layer is deliberately *not* dropped - it is created once and
@@ -558,7 +560,9 @@ actor CameraEngine {
         // completion handler fires in a few hundred milliseconds.
         if #available(macOS 26.0, iOS 26.0, *) {
             #if os(iOS)
+            #if !targetEnvironment(macCatalyst)
             captureSession.configuresApplicationAudioSessionForBluetoothHighQualityRecording = true
+            #endif
             #endif
         }
         #if os(iOS)
@@ -922,9 +926,17 @@ actor CameraEngine {
                     // Device-orientation-derived capture rotation (see
                     // `captureRotationAngle`); applied per shot so stills come
                     // out right-side up in every orientation. Skipped when the
-                    // consumer opted out of auto-oriented captures.
+                    // consumer opted out of auto-oriented captures. On a Mac
+                    // runtime the angle is forced to -90 (see
+                    // `applyCaptureRotationToPhotoAndMovieOutputs`).
                     if configuration.autoOrientsCaptures {
-                        photoOutputVideoConnection.videoRotationAngle = captureRotationAngle
+                        var angle = captureRotationAngle
+                        #if os(iOS)
+                        if Self.isRunningOnMac {
+                            angle = -90
+                        }
+                        #endif
+                        photoOutputVideoConnection.videoRotationAngle = angle
                     }
                 }
             }
@@ -1541,6 +1553,18 @@ actor CameraEngine {
 
     // MARK: - Rotation
 
+    #if os(iOS)
+    nonisolated static let isRunningOnMac: Bool = {
+        if #available(iOS 14.0, *) { return ProcessInfo.processInfo.isiOSAppOnMac }
+        return false
+    }()
+
+    nonisolated static let isMacCatalyst: Bool = {
+        if #available(iOS 14.0, *) { return ProcessInfo.processInfo.isMacCatalystApp }
+        return false
+    }()
+    #endif
+
     /// Applies the cached capture rotation to the photo and movie output
     /// connections.
     ///
@@ -1549,14 +1573,15 @@ actor CameraEngine {
     /// coordinator install, on every KVO angle change, and at capture time /
     /// session-graph changes, so the connections never carry a stale angle
     /// into a recording.
-    ///
-    /// Gated by `CaptureConfiguration.autoOrientsCaptures`: when disabled,
-    /// capture connections are left untouched and outputs are written
-    /// sensor-native (raw).
     func applyCaptureRotationToPhotoAndMovieOutputs() {
         guard #available(macOS 14.0, iOS 17.0, *) else { return }
         guard configuration.autoOrientsCaptures else { return }
-        let angle = captureRotationAngle
+        var angle = captureRotationAngle
+        #if os(iOS)
+        if CameraEngine.isRunningOnMac {
+            angle = -90
+        }
+        #endif
         if let connection = photoOutput?.connection(with: .video) {
             connection.videoRotationAngle = angle
         }
@@ -1568,15 +1593,11 @@ actor CameraEngine {
     // MARK: - System Sounds
 
     func playRecordingStartSound() {
-        #if os(iOS)
         AudioServicesPlaySystemSound(1113)
-        #endif
     }
 
     func playRecordingStopSound() {
-        #if os(iOS)
         AudioServicesPlaySystemSound(1114)
-        #endif
     }
 
     // MARK: - Snapshots for the facade

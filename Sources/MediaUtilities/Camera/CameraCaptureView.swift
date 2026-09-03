@@ -181,8 +181,8 @@ public struct CameraCaptureView: View {
         .onDisappear {
             Task { await cameraService.cleanupCamera() }
         }
-        #if os(macOS)
         .buttonStyle(.plain)
+        #if os(macOS)
         .frame(minHeight: 500)
         #endif
     }
